@@ -16,6 +16,54 @@ source_of_truth:
 
 # co-claw-dex
 
+## 配置与启动
+
+### 1. 配置凭证
+
+优先使用环境变量：
+
+```bash
+export OPENAI_API_KEY="your_api_key"
+```
+
+也可以使用本地配置文件：
+
+- `~/.codex/auth.json`
+- `~/.codex/config.toml`
+
+最小配置示例：
+
+```toml
+model_provider = "openai"
+model = "gpt-5.4"
+disable_response_storage = true
+
+[model_providers.openai]
+base_url = "https://api.openai.com/v1"
+wire_api = "responses"
+```
+
+### 2. 安装与构建
+
+```bash
+npm install
+npm run build
+```
+
+### 3. 启动命令
+
+```bash
+node cli.js --help
+npm start
+```
+
+### 4. 快速验证
+
+```bash
+node cli.js auth status --text
+node cli.js -p "Reply with exactly: hello"
+```
+
 `co-claw-dex` is a locally runnable Claude Code-style coding agent fork that swaps the original model provider boundary for an OpenAI/Codex-compatible Responses backend.
 
 The goal is not to redesign the CLI. The goal is to preserve the terminal UX, tool system, permission model, and agent flow while replacing the model runtime with an OpenAI-compatible backend.
