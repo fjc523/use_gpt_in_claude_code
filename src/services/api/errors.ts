@@ -921,6 +921,19 @@ export function getAssistantMessageFromError(
     })
   }
 
+  // Some runtime/subagent tear-down paths surface a bare `terminated` Error.
+  // In practice these turns are often manually resumable by the user, so
+  // surfacing an opaque synthetic `terminated` API error prevents query.ts's
+  // recoverable-interruption logic from continuing the same unfinished task.
+  // Map this legacy message onto the existing recoverable classifier phrase.
+  if (error instanceof Error && error.message.trim().toLowerCase() === 'terminated') {
+    return createAssistantAPIErrorMessage({
+      content: 'stream ended before completion',
+      error: 'unknown',
+      errorDetails: error.message,
+    })
+  }
+
   if (error instanceof Error) {
     return createAssistantAPIErrorMessage({
       content: `${API_ERROR_MESSAGE_PREFIX}: ${error.message}`,

@@ -399,6 +399,108 @@ The feature is successful when:
 - repeated interruptions eventually pause cleanly instead of looping forever
 - manual continue still works and uses the same resume path
 
+## Field findings from the reproduced failure
+
+A real user reproduction in session `081bd702-3357-431e-8350-e54c667b320c` narrowed the problem further than the original design summary.
+
+### What was observed
+
+The visible `terminated` signal was not just a UI label. It was persisted in session logs as a synthetic assistant API-error message.
+
+Observed shape:
+
+```json
+{
+  "model": "<synthetic>",
+  "isApiErrorMessage": true,
+  "content": [{ "type": "text", "text": "terminated" }]
+}
+```
+
+This appeared multiple times in the main session transcript and also inside subagent transcripts.
+
+### Where it actually happened
+
+The failing session was not the main thread only. The reproduced `terminated` events were found in subagent transcript files under:
+
+- `~/.claude/projects/-Users-han-project-notes/081bd702-3357-431e-8350-e54c667b320c/subagents/`
+
+Confirmed examples:
+
+- `agent-ae38cb19e8b8fdf94.jsonl`
+- `agent-ac4f3875235fc723d.jsonl`
+
+One concrete case was the subagent metadata entry:
+
+- description: `Norvig round one`
+
+The subagent transcript terminated with a synthetic API-error assistant message whose text was exactly `terminated`.
+
+### Why this matters
+
+This means the current problem is more specific than a generic "fetch failed" interruption:
+
+- the run often remains logically resumable from the user's perspective
+- but the runtime currently collapses some subagent termination paths into an opaque synthetic API-error message
+- that synthetic message is then surfaced to the user as `terminated`
+
+So the design target is not only:
+
+- retry recoverable transport failures
+
+It is also:
+
+- stop converting resumable or classifiable subagent interruptions into the generic synthetic string `terminated`
+
+### Updated diagnosis
+
+The current architecture already has partial recovery behavior in `query.ts`:
+
+- recoverable interruption text classifier
+- injected continuation prompt for the same unfinished task
+
+But the reproduced failure shows another path exists earlier or elsewhere in the stack:
+
+- a subagent/session/runtime termination path emits a synthetic API-error assistant message with `terminated`
+- the message loses the original error semantics
+- the parent session cannot distinguish whether the interruption was:
+  - user cancellation
+  - hard terminal failure
+  - recoverable transport interruption
+  - session lifecycle teardown that is still resumable by manual continue
+
+### Design implication
+
+A correct fix must preserve structured interruption reason across the subagent boundary.
+
+At minimum, the system should avoid flattening all such cases into:
+
+```text
+terminated
+```
+
+Instead, it should preserve a typed reason such as:
+
+- `user_cancelled`
+- `recoverable_network_error`
+- `stream_disconnected`
+- `session_ended`
+- `subagent_killed`
+- `resume_possible`
+
+This typed reason should be available to:
+
+- task state transitions
+- parent-agent orchestration
+- UI copy selection
+- auto-resume policy
+
+### Practical conclusion from the reproduction
+
+The concrete 6cx3b bug to solve is:
+
+> A subagent interruption that can still be resumed manually is currently being surfaced as a synthetic opaque `terminated` API error instead of a typed recoverable interruption that can reuse the shared resume path.
+
 ## Explicitly rejected approach
 
 Do not solve this by only sending the model a larger history transcript.
