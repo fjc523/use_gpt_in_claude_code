@@ -3624,7 +3624,7 @@ export function REPL({
     }
 
     // Ensure SessionStart hook context is available before the first API call.
-    await awaitPendingHooks();
+    await Promise.race([awaitPendingHooks(), new Promise<void>(resolve => setTimeout(resolve, 1500))]);
     await handlePromptSubmit({
       input,
       helpers,

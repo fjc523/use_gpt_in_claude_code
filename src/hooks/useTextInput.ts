@@ -18,10 +18,8 @@ import {
   updateYankLength,
   yankPop,
 } from '../utils/Cursor.js'
-import { env } from '../utils/env.js'
 import { isFullscreenEnvEnabled } from '../utils/fullscreen.js'
 import type { ImageDimensions } from '../utils/imageResizer.js'
-import { isModifierPressed, prewarmModifiers } from '../utils/modifiers.js'
 import { useDoublePress } from './useDoublePress.js'
 
 type MaybeCursor = void | Cursor
@@ -95,11 +93,6 @@ export function useTextInput({
   inlineGhostText,
   dim,
 }: UseTextInputProps): TextInputState {
-  // Pre-warm the modifiers module for Apple Terminal (has internal guard, safe to call multiple times)
-  if (env.terminal === 'Apple_Terminal') {
-    prewarmModifiers()
-  }
-
   const offset = externalOffset
   const setOffset = onOffsetChange
   const cursor = Cursor.fromText(originalValue, columns, offset)
@@ -258,11 +251,11 @@ export function useTextInput({
     if (key.meta || key.shift) {
       return cursor.insert('\n')
     }
-    // Apple Terminal doesn't support custom Shift+Enter keybindings,
-    // so we use native macOS modifier detection to check if Shift is held
-    if (env.terminal === 'Apple_Terminal' && isModifierPressed('shift')) {
-      return cursor.insert('\n')
-    }
+    // NOTE:
+    // On some Apple Terminal setups, modifiers-napi can hang when checking the
+    // live modifier state on Enter. That makes the whole REPL appear frozen
+    // right after pressing Return. Prefer a working submit path over native
+    // Shift+Enter detection here.
     onSubmit?.(originalValue)
   }
 
