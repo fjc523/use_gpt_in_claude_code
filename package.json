@@ -2,7 +2,9 @@
   "name": "@anthropic-ai/claude-code",
   "version": "1.0.2",
   "bin": {
-    "claude": "cli.js"
+    "claude": "cli.js",
+    "claude-codex": "cli.js",
+    "claudex": "cli-ant.js"
   },
   "engines": {
     "node": ">=18.0.0"
@@ -23,7 +25,7 @@
     "activate-ant-cli": "bash scripts/activate-ant-cli.sh",
     "activate-cli": "bash scripts/activate-local-cli.sh",
     "bootstrap": "bash scripts/bootstrap.sh",
-    "build": "bun run scripts/build.mjs && CLAUDE_CODE_BUILD_OUTDIR=dist-ant CLAUDE_CODE_PROMPT_VARIANT=ant bun run scripts/build.mjs",
+    "build": "CLAUDE_CODE_PACKAGE_VERSION=2.1.88 bun run scripts/build.mjs && CLAUDE_CODE_BUILD_OUTDIR=dist-ant CLAUDE_CODE_PROMPT_VARIANT=ant bun run scripts/build.mjs",
     "build:ant": "CLAUDE_CODE_BUILD_OUTDIR=dist-ant CLAUDE_CODE_PROMPT_VARIANT=ant bun run scripts/build.mjs",
     "build:claudex": "mkdir -p .build/claudex && CLAUDE_CODE_BUILD_OUTDIR=dist-ant CLAUDE_CODE_PROMPT_VARIANT=ant CLAUDE_CODE_PACKAGE_NAME=@zju_han/claudex-cli bun run scripts/build.mjs && CLAUDE_CODE_PACKAGE_NAME=@zju_han/claudex-cli node scripts/prepare-claudex-package.mjs && node scripts/verify-claudex-package.mjs",
     "clean": "rm -rf dist",

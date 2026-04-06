@@ -253,6 +253,12 @@ bunx vitest run --config vitest.config.ts tests/p0/model/openaiResponsesBackend.
 npm run activate-cli
 ```
 
+激活后命令对应关系为：
+
+- `claude` -> 当前默认构建（`cli.js` -> `dist/cli.js`，版本显示 `2.1.88`）
+- `claude-codex` -> 当前默认构建（`cli.js` -> `dist/cli.js`，版本显示 `2.1.88`）
+- `claudex` -> ant 变体构建（`cli-ant.js` -> `dist-ant/cli.js`，版本显示当前仓库版本）
+
 恢复官方链接：
 
 ```bash
