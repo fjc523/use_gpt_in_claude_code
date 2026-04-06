@@ -104,3 +104,21 @@ export TELEGRAM_CHAT_ID=<chat_id>
 - `docs/telegram.md` — Telegram 通知完整说明
 - `docs/implementation/hybrid-native-implementation-plan.md` — 当前实现工作的 source of truth
 - `docs/release-version-policy.md` — 发版与版本规则
+
+## 4. 本地 launcher 辅助脚本
+
+```bash
+npm run activate-cli
+```
+
+激活后命令对应关系为：
+
+- `claudex-local` -> 当前默认构建（`cli.js` -> `dist/cli.js`，版本显示 `2.1.88`）
+- `claude-codex` -> 当前默认构建（`cli.js` -> `dist/cli.js`，版本显示 `2.1.88`）
+- `claudex` -> ant 变体构建（`cli-ant.js` -> `dist-ant/cli.js`，版本显示当前仓库版本）
+
+恢复官方链接：
+
+```bash
+npm run restore-cli
+```
