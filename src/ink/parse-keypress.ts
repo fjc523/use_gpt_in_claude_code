@@ -702,7 +702,9 @@ function parseKeypress(s: string = ''): ParsedKey {
     key.raw = undefined
     key.name = 'return'
   } else if (s === '\n') {
-    key.name = 'enter'
+    // Some terminals / terminal settings send LF for the Enter key instead of
+    // CR. Normalize both to "return" so submit handlers keep working.
+    key.name = 'return'
   } else if (s === '\t') {
     key.name = 'tab'
   } else if (s === '\b' || s === '\x1b\b') {
