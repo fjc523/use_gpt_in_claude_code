@@ -22,14 +22,26 @@ const distVendorDir = join(distDir, 'vendor')
 const strayOutFile = join(rootDir, 'src', 'entrypoints', 'cli.js')
 const strayMapFile = join(rootDir, 'src', 'entrypoints', 'cli.js.map')
 
+const packageVersion =
+  process.env.CLAUDE_CODE_PACKAGE_VERSION?.trim() || packageJson.version
+const packageUrl = process.env.CLAUDE_CODE_PACKAGE_NAME?.trim() || packageJson.name
+const nativePackageUrl =
+  process.env.CLAUDE_CODE_NATIVE_PACKAGE_NAME?.trim() || packageUrl
+const feedbackChannel =
+  process.env.CLAUDE_CODE_FEEDBACK_CHANNEL?.trim() ||
+  packageJson.bugs?.url ||
+  packageJson.homepage ||
+  ''
+const versionChangelog = process.env.CLAUDE_CODE_VERSION_CHANGELOG?.trim() || ''
+
 const defines = {
-  'MACRO.VERSION': packageJson.version,
+  'MACRO.VERSION': packageVersion,
   'MACRO.BUILD_TIME': new Date().toISOString(),
-  'MACRO.PACKAGE_URL': packageJson.name,
-  'MACRO.NATIVE_PACKAGE_URL': packageJson.name,
-  'MACRO.FEEDBACK_CHANNEL': packageJson.bugs?.url ?? packageJson.homepage,
+  'MACRO.PACKAGE_URL': packageUrl,
+  'MACRO.NATIVE_PACKAGE_URL': nativePackageUrl,
+  'MACRO.FEEDBACK_CHANNEL': feedbackChannel,
   'MACRO.ISSUES_EXPLAINER': 'open an issue',
-  'MACRO.VERSION_CHANGELOG': '',
+  'MACRO.VERSION_CHANGELOG': versionChangelog,
   ...(outputUserType ? { 'process.env.USER_TYPE': outputUserType } : {}),
   ...(promptVariant
     ? { 'process.env.CLAUDE_CODE_PROMPT_VARIANT': promptVariant }

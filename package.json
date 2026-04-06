@@ -11,13 +11,13 @@
   "author": "Anthropic <support@anthropic.com>",
   "license": "SEE LICENSE IN README.md",
   "description": "A Claude Code-style terminal coding agent platform wired to an OpenAI/Codex-compatible Responses backend.",
-  "homepage": "https://github.com/InDreamer/co-claw-dex",
+  "homepage": "https://github.com/Bisgates/use_gpt_in_claude_code",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/InDreamer/co-claw-dex.git"
+    "url": "git+https://github.com/Bisgates/use_gpt_in_claude_code.git"
   },
   "bugs": {
-    "url": "https://github.com/InDreamer/co-claw-dex/issues"
+    "url": "https://github.com/Bisgates/use_gpt_in_claude_code/issues"
   },
   "scripts": {
     "activate-ant-cli": "bash scripts/activate-ant-cli.sh",
@@ -25,6 +25,7 @@
     "bootstrap": "bash scripts/bootstrap.sh",
     "build": "bun run scripts/build.mjs && CLAUDE_CODE_BUILD_OUTDIR=dist-ant CLAUDE_CODE_PROMPT_VARIANT=ant bun run scripts/build.mjs",
     "build:ant": "CLAUDE_CODE_BUILD_OUTDIR=dist-ant CLAUDE_CODE_PROMPT_VARIANT=ant bun run scripts/build.mjs",
+    "build:claudex": "mkdir -p .build/claudex && CLAUDE_CODE_BUILD_OUTDIR=dist-ant CLAUDE_CODE_PROMPT_VARIANT=ant CLAUDE_CODE_PACKAGE_NAME=@zju_han/claudex-cli bun run scripts/build.mjs && CLAUDE_CODE_PACKAGE_NAME=@zju_han/claudex-cli node scripts/prepare-claudex-package.mjs && node scripts/verify-claudex-package.mjs",
     "clean": "rm -rf dist",
     "prepublishOnly": "node -e \"if (!process.env.AUTHORIZED) { console.error('ERROR: Direct publishing is not allowed.\\nPlease see the release workflow documentation to publish this package.'); process.exit(1); }\"",
     "restore-cli": "bash scripts/restore-official-cli.sh",
