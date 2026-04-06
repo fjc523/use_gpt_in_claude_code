@@ -161,6 +161,17 @@ base_url = "https://api.openai.com/v1"
 wire_api = "responses"
 ```
 
+## Release Notes
+
+Formal release and npm publish work must follow `docs/release-version-policy.md`.
+
+Operational reminder for the current GitHub Actions release workflow:
+
+- The release workflow reads npm publish credentials from the repository Actions secret `NPM_TOKEN`.
+- `NPM_TOKEN` should be an npm **automation token** (or equivalent non-interactive CI publish token).
+- A token that still requires publish-time OTP / 2FA confirmation will fail in CI with `EOTP` during `npm publish`.
+- For this workflow, configuring only an environment secret is insufficient unless the workflow explicitly uses that environment.
+
 ## Architecture
 
 The migration keeps the original runtime shape as intact as possible.

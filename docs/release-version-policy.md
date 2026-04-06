@@ -106,6 +106,17 @@ release PR 合并后，`main` 上的目标 commit 就是待发布内容。
 - tag 指向的 commit 已经在 `main` 上
 - 目标 npm 包版本尚未存在于 registry
 
+### 4.1 发布凭证要求
+
+正式发版 workflow 还必须满足以下凭证约束：
+
+- npm 发布凭证必须通过 GitHub Actions secret 注入，不能依赖本地机器登录态。
+- 如果 workflow 读取 `${{ secrets.NPM_TOKEN }}`，则必须在 **repository-level Actions secrets** 中配置名为 `NPM_TOKEN` 的 secret。
+- 除非 workflow 明确声明并使用了对应的 environment，否则不要把正式发布凭证只放在 environment secrets 里。
+- `NPM_TOKEN` 必须是可用于 CI/CD 自动发布的 **automation token**（或 npm 后续等价的非交互式发布 token）。
+- 不允许使用发布时仍要求交互式 OTP / 2FA 验证的一般 token 作为正式自动化发布凭证；否则 workflow 会在 `npm publish` 阶段以 `EOTP` 失败。
+- 自动化发布需要保证整个 tag workflow 无人值守可完成；因此凭证类型必须与“受控 tag workflow 自动发布”这一要求兼容。
+
 ### 5. 先发布 npm，再创建 GitHub Release
 
 正式发版顺序固定为：
@@ -125,6 +136,8 @@ release PR 合并后，`main` 上的目标 commit 就是待发布内容。
 - **唯一来源闸门**：正式发版流程不得读取第二个正式版本来源
 - **重复发布闸门**：如果 npm registry 已存在同版本，流程必须直接失败
 - **触发来源闸门**：正式 publish 只能由受控的 tag workflow 触发，不能由普通 branch push 触发
+- **凭证注入闸门**：正式 npm 发布凭证必须由 GitHub Actions secret 注入，并与 workflow 中声明的 secret 名称完全一致
+- **非交互凭证闸门**：正式发布凭证必须支持无人值守发布，不能在 `npm publish` 阶段要求手工输入 OTP
 - **成功顺序闸门**：只有 npm publish 成功后，才允许创建 GitHub Release
 
 ## 禁止事项
