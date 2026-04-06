@@ -156,8 +156,7 @@ ${AGENT_TOOL_NAME}({
   const currentExamples = `Example usage:
 
 <example_agent_descriptions>
-"test-runner": use this agent after you are done writing code to run tests
-"greeting-responder": use this agent to respond to user greetings with a friendly joke
+"general-purpose": use this agent for open-ended research, multi-step investigation, or tasks where you need a fresh subagent without a specialized built-in type
 </example_agent_descriptions>
 
 <example>
@@ -173,17 +172,17 @@ function isPrime(n) {
 }
 </code>
 <commentary>
-Since a significant piece of code was written and the task was completed, now use the test-runner agent to run the tests
+Since a significant piece of code was written and the task was completed, now use the general-purpose agent to run the relevant follow-up verification for the codebase.
 </commentary>
-assistant: Uses the ${AGENT_TOOL_NAME} tool to launch the test-runner agent
+assistant: Uses the ${AGENT_TOOL_NAME} tool to launch the general-purpose agent
 </example>
 
 <example>
 user: "Hello"
 <commentary>
-Since the user is greeting, use the greeting-responder agent to respond with a friendly joke
+This is just a simple greeting, so respond directly instead of launching a subagent.
 </commentary>
-assistant: "I'm going to use the ${AGENT_TOOL_NAME} tool to launch the greeting-responder agent"
+assistant: "Hello!"
 </example>
 `
 

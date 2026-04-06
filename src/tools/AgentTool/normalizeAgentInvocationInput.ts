@@ -7,6 +7,11 @@ import {
 import { GENERAL_PURPOSE_AGENT } from './built-in/generalPurposeAgent.js'
 import type { AgentDefinition } from './loadAgentsDir.js'
 
+const LEGACY_EXAMPLE_AGENT_FALLBACKS: Readonly<Record<string, string>> = {
+  'greeting-responder': GENERAL_PURPOSE_AGENT.agentType,
+  'test-runner': GENERAL_PURPOSE_AGENT.agentType,
+}
+
 export function normalizeOptionalAgentString(
   value: string | undefined,
 ): string | undefined {
@@ -34,6 +39,17 @@ export function normalizeAgentInvocationInput({
   if (!normalizedSubagentType) {
     return {
       subagentType: undefined,
+      model,
+    }
+  }
+
+  const legacyFallbackAgent = LEGACY_EXAMPLE_AGENT_FALLBACKS[normalizedSubagentType]
+  if (legacyFallbackAgent) {
+    logForDebugging(
+      `[AgentTool] Mapping legacy example agent '${normalizedSubagentType}' to ${legacyFallbackAgent}.`,
+    )
+    return {
+      subagentType: legacyFallbackAgent,
       model,
     }
   }
