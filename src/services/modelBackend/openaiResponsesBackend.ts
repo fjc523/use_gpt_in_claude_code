@@ -1548,7 +1548,7 @@ export async function* runOpenAIResponses(
                 event.item?.type === 'message'
                   ? extractOpenAIResponseMessageText(event.item)
                   : ''
-              if (text) {
+              if (text && !streamedTextContent.has(index)) {
                 appendStreamText(streamedTextContent, index, text)
                 const streamEvents = startedTextBlockIndexes.has(index)
                   ? [createTextDeltaStreamEvent(index, text)]
@@ -1568,7 +1568,7 @@ export async function* runOpenAIResponses(
                 event.item?.type === 'reasoning'
                   ? extractOpenAIResponseReasoningText(event.item)
                   : ''
-              if (thinking) {
+              if (thinking && !streamedReasoningContent.has(index)) {
                 appendStreamText(streamedReasoningContent, index, thinking)
                 const streamEvents = startedThinkingBlockIndexes.has(index)
                   ? [createThinkingDeltaStreamEvent(index, thinking)]

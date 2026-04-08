@@ -5,7 +5,7 @@ import { setupTerminal, shouldOfferTerminalSetup } from '../commands/terminalSet
 import { useExitOnCtrlCDWithKeybindings } from '../hooks/useExitOnCtrlCDWithKeybindings.js';
 import { Box, Link, Newline, Text, useTheme } from '../ink.js';
 import { useKeybindings } from '../keybindings/useKeybinding.js';
-import { getOpenAIApiKey, isOpenAIResponsesBackendEnabled } from '../services/modelBackend/openaiCodexConfig.js';
+import { describeOpenAIApiKeySources, getOpenAIApiKey, isOpenAIResponsesBackendEnabled } from '../services/modelBackend/openaiCodexConfig.js';
 import { isAnthropicAuthEnabled } from '../utils/auth.js';
 import { normalizeApiKeyForConfig } from '../utils/authPortable.js';
 import { getCustomApiKeyStatus } from '../utils/config.js';
@@ -105,7 +105,7 @@ export function Onboarding({
         {getOpenAIApiKey() ? <Text color="success">
             Credentials were detected. No browser login is required.
           </Text> : <Text color="warning">
-            No OpenAI/Codex API key was detected. Set <Text bold>OPENAI_API_KEY</Text> or add it to <Text bold>~/.codex/auth.json</Text> before sending prompts.
+            No OpenAI/Codex API key was detected. Set <Text bold>{describeOpenAIApiKeySources()}</Text> before sending prompts.
           </Text>}
         <Text dimColor>
           Use <Text bold>/login</Text> or <Text bold>claude auth status</Text> to inspect the active credential source.

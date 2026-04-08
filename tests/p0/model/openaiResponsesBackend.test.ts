@@ -3281,6 +3281,150 @@ describe('openaiResponsesBackend fork contracts', () => {
     ])
   })
 
+  it('[P0:model] reconstructs assistant output from streamed output_item events when response.completed omits the final output array', async () => {
+    fetchOpenAIResponseMock.mockResolvedValue(
+      makeSseResponse([
+        { type: 'response.created' },
+        {
+          type: 'response.output_item.added',
+          output_index: 0,
+          item: {
+            id: 'msg-streamed-only-1',
+            type: 'message',
+            role: 'assistant',
+            status: 'in_progress',
+            content: [],
+          },
+        },
+        {
+          type: 'response.content_part.added',
+          output_index: 0,
+          item_id: 'msg-streamed-only-1',
+          content_index: 0,
+          part: {
+            type: 'output_text',
+            text: '',
+            annotations: [],
+          },
+        },
+        {
+          type: 'response.output_text.delta',
+          output_index: 0,
+          item_id: 'msg-streamed-only-1',
+          content_index: 0,
+          delta: 'hello',
+        },
+        {
+          type: 'response.output_item.done',
+          output_index: 0,
+          item: {
+            id: 'msg-streamed-only-1',
+            type: 'message',
+            role: 'assistant',
+            status: 'completed',
+            content: [
+              {
+                type: 'output_text',
+                text: 'hello',
+                annotations: [],
+              },
+            ],
+          },
+        },
+        {
+          type: 'response.completed',
+          response: {
+            id: 'resp-streamed-only-1',
+            output: [],
+            usage: {
+              input_tokens: 1,
+              output_tokens: 1,
+            },
+          },
+        },
+      ]),
+    )
+
+    const outputs = await collect(
+      runOpenAIResponses({
+        messages: [],
+        systemPrompt: ['system'],
+        tools: [],
+        options: { model: 'sonnet' },
+        signal: new AbortController().signal,
+      } as any),
+    )
+
+    expect(outputs).toEqual([
+      {
+        type: 'stream_event',
+        event: {
+          type: 'message_start',
+          message: { usage: { input_tokens: 0, output_tokens: 0 } },
+        },
+      },
+      {
+        type: 'stream_event',
+        event: {
+          type: 'content_block_start',
+          index: 0,
+          content_block: {
+            type: 'text',
+            text: '',
+          },
+        },
+      },
+      {
+        type: 'stream_event',
+        event: {
+          type: 'content_block_delta',
+          index: 0,
+          delta: {
+            type: 'text_delta',
+            text: 'hello',
+          },
+        },
+      },
+      {
+        type: 'stream_event',
+        event: {
+          type: 'content_block_stop',
+          index: 0,
+        },
+      },
+      {
+        type: 'stream_event',
+        event: { type: 'message_stop' },
+      },
+      {
+        type: 'assistant',
+        message: {
+          role: 'assistant',
+          model: 'gpt-5.2',
+          id: 'msg-streamed-only-1',
+          usage: {
+            input_tokens: 1,
+            cache_creation_input_tokens: 0,
+            cache_read_input_tokens: 0,
+            output_tokens: 1,
+            server_tool_use: { web_search_requests: 0, web_fetch_requests: 0 },
+            service_tier: null,
+            cache_creation: {
+              ephemeral_1h_input_tokens: 0,
+              ephemeral_5m_input_tokens: 0,
+            },
+            inference_geo: null,
+            iterations: null,
+            speed: null,
+          },
+          content: [{ type: 'text', text: 'hello', citations: [] }],
+        },
+        requestId: 'resp-streamed-only-1',
+      },
+    ])
+  })
+
+
   it('[P0:model] recovers a final assistant message from streamed text when the SSE stream ends before response.completed arrives', async () => {
     fetchOpenAIResponseMock.mockResolvedValue(
       makeSseResponse([

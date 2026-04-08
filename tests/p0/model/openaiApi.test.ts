@@ -15,7 +15,10 @@ async function loadOpenAIApiModule(options: LoadOptions = {}) {
   vi.resetModules()
 
   vi.doMock('../../../src/services/modelBackend/openaiCodexConfig.js', () => ({
+    describeOpenAIApiKeySources: () => 'OPENAI_API_KEY or ~/.codex/auth.json',
     getOpenAIApiKey: () => options.apiKey,
+    getMissingOpenAIApiKeyMessage: () =>
+      'No OpenAI/Codex API key is configured. Expected OPENAI_API_KEY or ~/.codex/auth.json.',
     resolveOpenAIBaseUrl: () => options.baseUrl ?? 'https://api.example.com/v1',
     resolveOpenAIProviderHeaders: () => options.providerHeaders,
     resolveOpenAIProviderQueryParams: () => options.providerQueryParams,
@@ -319,7 +322,7 @@ describe('openaiApi fork contracts', () => {
   it('[P0:model] surfaces missing-auth, OpenAI error payloads, and empty JSON responses as stable public errors', async () => {
     const noKeyApi = await loadOpenAIApiModule({ apiKey: undefined })
     await expect(noKeyApi.fetchOpenAIResponse('/responses')).rejects.toThrow(
-      'OPENAI_API_KEY is not configured. Expected ~/.codex/auth.json or OPENAI_API_KEY.',
+      'No OpenAI/Codex API key is configured. Expected OPENAI_API_KEY or ~/.codex/auth.json.',
     )
 
     vi.stubGlobal(

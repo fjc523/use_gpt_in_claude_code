@@ -1,6 +1,7 @@
 import { getIsNonInteractiveSession } from '../../bootstrap/state.js'
 import { jsonStringify } from '../../utils/slowOperations.js'
 import {
+  getMissingOpenAIApiKeyMessage,
   getOpenAIApiKey,
   resolveOpenAIBaseUrl,
   resolveOpenAIProviderHeaders,
@@ -14,9 +15,6 @@ import {
   shouldAttachOpenAICodexTurnMetadata,
 } from './openaiCodexIdentity.js'
 import type { OpenAIErrorPayload } from './openaiResponsesTypes.js'
-
-const MISSING_OPENAI_API_KEY_MESSAGE =
-  'OPENAI_API_KEY is not configured. Expected ~/.codex/auth.json or OPENAI_API_KEY.'
 
 function parseRetryAfterMs(
   headers: Headers,
@@ -194,7 +192,7 @@ export async function fetchOpenAIResponse(
 ): Promise<Response> {
   const apiKey = getOpenAIApiKey()
   if (!apiKey) {
-    throw new Error(MISSING_OPENAI_API_KEY_MESSAGE)
+    throw new Error(getMissingOpenAIApiKeyMessage())
   }
 
   const { method = 'GET', body, headers, signal } = options
