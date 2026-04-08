@@ -2,9 +2,12 @@
 
 import { BRAND_NAME } from '../../constants/brand.js'
 import {
+  describeOpenAIApiKeySources,
   getOpenAIApiKey,
+  getMissingOpenAIApiKeyMessage,
   loadCodexAuthConfig,
   loadCodexProviderConfig,
+  resolveOpenAIApiKeyEnvKey,
   resolveOpenAIBaseUrl,
   resolveOpenAIModel,
   shouldStoreOpenAIResponses,
@@ -14,10 +17,18 @@ import { errorMessage } from '../../utils/errors.js'
 import { renderModelName } from '../../utils/model/model.js'
 import { jsonStringify } from '../../utils/slowOperations.js'
 
-type ApiKeySource = 'OPENAI_API_KEY' | '~/.codex/auth.json' | 'none'
+type ApiKeySource = string | 'none'
 
 function getApiKeySource(): ApiKeySource {
-  if (process.env.OPENAI_API_KEY?.trim()) {
+  const configuredEnvKey = resolveOpenAIApiKeyEnvKey()
+  const configuredEnvValue = process.env[configuredEnvKey]?.trim()
+  if (configuredEnvValue) {
+    return configuredEnvKey
+  }
+  if (
+    configuredEnvKey !== 'OPENAI_API_KEY' &&
+    process.env.OPENAI_API_KEY?.trim()
+  ) {
     return 'OPENAI_API_KEY'
   }
   if (loadCodexAuthConfig().openaiApiKey) {
@@ -34,8 +45,7 @@ async function validateConfiguredKey(): Promise<{
   if (!apiKey) {
     return {
       ok: false,
-      error:
-        'No API key is configured. Expected OPENAI_API_KEY or ~/.codex/auth.json.',
+      error: getMissingOpenAIApiKeyMessage(),
     }
   }
 
@@ -110,7 +120,7 @@ export async function authLogin(): Promise<void> {
   if (!status.loggedIn) {
     process.stderr.write(
       `${BRAND_NAME} uses OpenAI/Codex-style file or environment credentials.\n` +
-        'Set OPENAI_API_KEY or add OPENAI_API_KEY to ~/.codex/auth.json, then retry.\n',
+        `Set ${describeOpenAIApiKeySources()}, then retry.\n`,
     )
     process.exit(1)
   }
@@ -146,11 +156,11 @@ export async function authStatus(opts: {
     process.stdout.write(`Wire API: ${status.wireApi}\n`)
     process.stdout.write(`Store responses: ${status.storeResponses}\n`)
     process.stdout.write(
-      `API key: ${status.apiKeySource ?? 'not configured'}\n`,
+        `API key: ${status.apiKeySource ?? 'not configured'}\n`,
     )
     if (!status.loggedIn) {
       process.stdout.write(
-        `Not configured. Set OPENAI_API_KEY or ~/.codex/auth.json.\n`,
+        `Not configured. Set ${describeOpenAIApiKeySources()}.\n`,
       )
     }
   } else {
@@ -163,7 +173,7 @@ export async function authStatus(opts: {
 export async function authLogout(): Promise<void> {
   process.stdout.write(
     `${BRAND_NAME} does not manage OpenAI/Codex credentials directly.\n` +
-      'Remove OPENAI_API_KEY from the environment or edit ~/.codex/auth.json if you want to disable this backend.\n',
+      `Remove ${describeOpenAIApiKeySources()} if you want to disable this backend.\n`,
   )
   process.exit(0)
 }

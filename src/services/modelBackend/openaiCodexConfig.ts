@@ -9,6 +9,7 @@ type CodexProviderConfig = {
   disableResponseStorage: boolean
   baseUrl: string
   wireApi: string
+  envKey: string
   requiresOpenAIAuth: boolean
   promptCacheRetention?: 'in_memory' | '24h'
   modelContextWindow?: number
@@ -32,6 +33,7 @@ let cachedAuthConfig: CodexAuthConfig | null | undefined
 
 const DEFAULT_MODEL = 'gpt-5.4'
 const DEFAULT_BASE_URL = 'https://api.openai.com/v1'
+const DEFAULT_ENV_KEY = 'OPENAI_API_KEY'
 
 function getCodexConfigPath(): string {
   return join(homedir(), '.codex', 'config.toml')
@@ -113,6 +115,22 @@ function normalizeBaseUrl(baseUrl: string | undefined): string {
   return trimmed
 }
 
+function normalizeEnvKey(envKey: string | undefined): string {
+  const trimmed = envKey?.trim()
+  return trimmed || DEFAULT_ENV_KEY
+}
+
+function getConfiguredApiKeyEnvNames(): string[] {
+  const configured = normalizeEnvKey(loadCodexProviderConfig().envKey)
+  return configured === DEFAULT_ENV_KEY
+    ? [DEFAULT_ENV_KEY]
+    : [configured, DEFAULT_ENV_KEY]
+}
+
+function getConfiguredAuthJsonKeyNames(): string[] {
+  return getConfiguredApiKeyEnvNames()
+}
+
 export function loadCodexProviderConfig(): CodexProviderConfig {
   if (cachedProviderConfig) return cachedProviderConfig
   if (cachedProviderConfig === null) {
@@ -122,6 +140,7 @@ export function loadCodexProviderConfig(): CodexProviderConfig {
       disableResponseStorage: true,
       baseUrl: DEFAULT_BASE_URL,
       wireApi: 'responses',
+      envKey: DEFAULT_ENV_KEY,
       requiresOpenAIAuth: false,
       promptCacheRetention: undefined,
       modelContextWindow: undefined,
@@ -149,6 +168,9 @@ export function loadCodexProviderConfig(): CodexProviderConfig {
   const wireApi =
     matchString(providerSection, /^\s*wire_api\s*=\s*"([^"]+)"/m) ||
     'responses'
+  const envKey = normalizeEnvKey(
+    matchString(providerSection, /^\s*env_key\s*=\s*"([^"]+)"/m),
+  )
   const requiresOpenAIAuth =
     matchBoolean(
       providerSection,
@@ -187,6 +209,7 @@ export function loadCodexProviderConfig(): CodexProviderConfig {
     disableResponseStorage,
     baseUrl: normalizeBaseUrl(baseUrl),
     wireApi,
+    envKey,
     requiresOpenAIAuth,
     promptCacheRetention,
     modelContextWindow,
@@ -214,9 +237,15 @@ export function loadCodexAuthConfig(): CodexAuthConfig {
   }
 
   try {
-    const parsed = JSON.parse(raw) as { OPENAI_API_KEY?: string }
+    const parsed = JSON.parse(raw) as Record<string, unknown>
+    const openaiApiKey = getConfiguredAuthJsonKeyNames()
+      .map(key => {
+        const value = parsed[key]
+        return typeof value === 'string' ? value.trim() : undefined
+      })
+      .find(value => Boolean(value))
     cachedAuthConfig = {
-      openaiApiKey: parsed.OPENAI_API_KEY?.trim() || undefined,
+      openaiApiKey,
     }
     return cachedAuthConfig
   } catch {
@@ -226,9 +255,24 @@ export function loadCodexAuthConfig(): CodexAuthConfig {
 }
 
 export function getOpenAIApiKey(): string | undefined {
-  const envKey = process.env.OPENAI_API_KEY?.trim()
-  if (envKey) return envKey
+  for (const envName of getConfiguredApiKeyEnvNames()) {
+    const envKey = process.env[envName]?.trim()
+    if (envKey) return envKey
+  }
   return loadCodexAuthConfig().openaiApiKey
+}
+
+export function resolveOpenAIApiKeyEnvKey(): string {
+  return loadCodexProviderConfig().envKey
+}
+
+export function describeOpenAIApiKeySources(): string {
+  const envNames = getConfiguredApiKeyEnvNames()
+  return [...envNames, '~/.codex/auth.json'].join(' or ')
+}
+
+export function getMissingOpenAIApiKeyMessage(): string {
+  return `No OpenAI/Codex API key is configured. Expected ${describeOpenAIApiKeySources()}.`
 }
 
 export function resolveOpenAIBaseUrl(): string {

@@ -99,7 +99,7 @@ import { initBuiltinPlugins } from './plugins/bundled/index.js';
 /* eslint-enable @typescript-eslint/no-require-imports */
 import { checkQuotaStatus } from './services/claudeAiLimits.js';
 import { getMcpToolsCommandsAndResources, prefetchAllMcpResources } from './services/mcp/client.js';
-import { isOpenAIResponsesBackendEnabled } from './services/modelBackend/openaiCodexConfig.js';
+import { describeOpenAIApiKeySources, isOpenAIResponsesBackendEnabled } from './services/modelBackend/openaiCodexConfig.js';
 import { VALID_INSTALLABLE_SCOPES, VALID_UPDATE_SCOPES } from './services/plugins/pluginCliCommands.js';
 import { initBundledSkills } from './skills/bundled/index.js';
 import type { AgentColorName } from './tools/AgentTool/agentColorManager.js';
@@ -229,7 +229,7 @@ function getPrintOptionDescription(): string {
 
 function getBareModeDescription(): string {
   if (isOpenAIBackendEnabledForCli()) {
-    return 'Minimal mode: skip hooks, LSP, plugin sync, attribution, auto-memory, background prefetches, keychain reads, and CLAUDE.md auto-discovery. Sets CLAUDE_CODE_SIMPLE=1. OpenAI/Codex auth is strictly OPENAI_API_KEY or ~/.codex/auth.json for the Responses backend (other providers still use their own credentials). Skills still resolve via /skill-name. Explicitly provide context via: --system-prompt[-file], --append-system-prompt[-file], --add-dir (CLAUDE.md dirs), --mcp-config, --settings, --agents, --plugin-dir.'
+    return `Minimal mode: skip hooks, LSP, plugin sync, attribution, auto-memory, background prefetches, keychain reads, and CLAUDE.md auto-discovery. Sets CLAUDE_CODE_SIMPLE=1. OpenAI/Codex auth is strictly ${describeOpenAIApiKeySources()} for the Responses backend (other providers still use their own credentials). Skills still resolve via /skill-name. Explicitly provide context via: --system-prompt[-file], --append-system-prompt[-file], --add-dir (CLAUDE.md dirs), --mcp-config, --settings, --agents, --plugin-dir.`
   }
   return 'Minimal mode: skip hooks, LSP, plugin sync, attribution, auto-memory, background prefetches, keychain reads, and CLAUDE.md auto-discovery. Sets CLAUDE_CODE_SIMPLE=1. Anthropic auth is strictly ANTHROPIC_API_KEY or apiKeyHelper via --settings (OAuth and keychain are never read). 3P providers (Bedrock/Vertex/Foundry) use their own credentials. Skills still resolve via /skill-name. Explicitly provide context via: --system-prompt[-file], --append-system-prompt[-file], --add-dir (CLAUDE.md dirs), --mcp-config, --settings, --agents, --plugin-dir.'
 }
@@ -243,7 +243,7 @@ function getModelOptionDescription(): string {
 
 function getAuthLoginDescription(): string {
   return isOpenAIBackendEnabledForCli()
-    ? 'Validate OpenAI/Codex API credentials from OPENAI_API_KEY or ~/.codex/auth.json'
+    ? `Validate OpenAI/Codex API credentials from ${describeOpenAIApiKeySources()}`
     : 'Sign in to your Anthropic account'
 }
 

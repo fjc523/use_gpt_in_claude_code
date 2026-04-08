@@ -5,6 +5,7 @@ const ENV_KEYS = [
   'OPENAI_MODEL',
   'OPENAI_BASE_URL',
   'OPENAI_API_KEY',
+  'CODEX_API_KEY',
   'OPENAI_MODEL_CONTEXT_WINDOW',
   'OPENAI_PROMPT_CACHE_RETENTION',
   'OPENAI_REASONING_EFFORT',
@@ -33,6 +34,9 @@ async function loadCodexConfigModule(options?: {
   env?: Partial<Record<(typeof ENV_KEYS)[number], string | undefined>>
 }) {
   restoreEnv()
+  for (const key of ENV_KEYS) {
+    delete process.env[key]
+  }
   for (const [key, value] of Object.entries(options?.env ?? {})) {
     if (value === undefined) {
       delete process.env[key]
@@ -84,6 +88,7 @@ describe('openaiCodexConfig fork contracts', () => {
       disableResponseStorage: true,
       baseUrl: 'https://api.openai.com/v1',
       wireApi: 'responses',
+      envKey: 'OPENAI_API_KEY',
       requiresOpenAIAuth: false,
       promptCacheRetention: undefined,
       modelContextWindow: undefined,
@@ -150,6 +155,7 @@ describe('openaiCodexConfig fork contracts', () => {
       disableResponseStorage: true,
       baseUrl: 'https://api.openai.com/v1',
       wireApi: 'responses',
+      envKey: 'OPENAI_API_KEY',
       requiresOpenAIAuth: false,
       promptCacheRetention: '24h',
       modelContextWindow: undefined,
@@ -169,6 +175,7 @@ describe('openaiCodexConfig fork contracts', () => {
         '[model_providers.corp]',
         'base_url = "https://corp.example.com/v1/responses/"',
         'wire_api = "chat_completions"',
+        'env_key = "CODEX_API_KEY"',
         'requires_openai_auth = true',
         'prompt_cache_retention = "24h"',
         'model_context_window = 777777',
@@ -182,6 +189,7 @@ describe('openaiCodexConfig fork contracts', () => {
       disableResponseStorage: true,
       baseUrl: 'https://corp.example.com/v1',
       wireApi: 'chat_completions',
+      envKey: 'CODEX_API_KEY',
       requiresOpenAIAuth: true,
       promptCacheRetention: '24h',
       modelContextWindow: 777777,
@@ -211,6 +219,46 @@ describe('openaiCodexConfig fork contracts', () => {
     })
     expect(fromEnv.resolveOpenAIBaseUrl()).toBe('https://override.example.com/v1')
     expect(fromEnv.getOpenAIApiKey()).toBe('env-key')
+  })
+
+  it('[P0:model] honors provider env_key for both environment and auth.json lookups while preserving OPENAI_API_KEY fallback', async () => {
+    const fromConfiguredEnv = await loadCodexConfigModule({
+      configToml: [
+        'model_provider = "codex"',
+        '[model_providers.codex]',
+        'env_key = "CODEX_API_KEY"',
+      ].join('\n'),
+      env: {
+        CODEX_API_KEY: 'codex-env-key',
+      },
+    })
+    expect(fromConfiguredEnv.resolveOpenAIApiKeyEnvKey()).toBe('CODEX_API_KEY')
+    expect(fromConfiguredEnv.getOpenAIApiKey()).toBe('codex-env-key')
+    expect(fromConfiguredEnv.describeOpenAIApiKeySources()).toBe(
+      'CODEX_API_KEY or OPENAI_API_KEY or ~/.codex/auth.json',
+    )
+
+    const fromAuthJson = await loadCodexConfigModule({
+      configToml: [
+        'model_provider = "codex"',
+        '[model_providers.codex]',
+        'env_key = "CODEX_API_KEY"',
+      ].join('\n'),
+      authJson: '{"CODEX_API_KEY":" file-codex-key "}',
+    })
+    expect(fromAuthJson.getOpenAIApiKey()).toBe('file-codex-key')
+
+    const fromOpenAIFallback = await loadCodexConfigModule({
+      configToml: [
+        'model_provider = "codex"',
+        '[model_providers.codex]',
+        'env_key = "CODEX_API_KEY"',
+      ].join('\n'),
+      env: {
+        OPENAI_API_KEY: 'openai-fallback-key',
+      },
+    })
+    expect(fromOpenAIFallback.getOpenAIApiKey()).toBe('openai-fallback-key')
   })
 
   it('[P0:model] lets top-level prompt-cache retention, context window, and reasoning effort override provider-section values', async () => {

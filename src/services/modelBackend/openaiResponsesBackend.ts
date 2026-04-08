@@ -731,6 +731,7 @@ export async function* runOpenAIResponses(
     const streamedResponse = await streamResponse(url, request, params.signal)
     const outputIndexes = new Map<string, number>()
     const outputItemTypes = new Map<number, string>()
+    const streamedOutputItems = new Map<number, OpenAIResponseOutputItem>()
     // Preserve display-only native items across stream events so we can emit
     // low-noise progress summaries without changing who actually executes tools.
     const streamedNativeItems = new Map<
@@ -772,6 +773,9 @@ export async function* runOpenAIResponses(
           }
           if (event.item?.type) {
             outputItemTypes.set(index, event.item.type)
+          }
+          if (event.item) {
+            streamedOutputItems.set(index, event.item)
           }
 
           if (event.item?.type === 'function_call') {
@@ -1050,6 +1054,9 @@ export async function* runOpenAIResponses(
         }
         case 'response.output_item.done': {
           const index = getOutputIndexForStreamEvent(event, outputIndexes)
+          if (event.item) {
+            streamedOutputItems.set(index, event.item)
+          }
           const itemType = event.item?.type ?? outputItemTypes.get(index)
           if (itemType === 'message') {
             if (startedTextBlockIndexes.delete(index)) {
@@ -1121,6 +1128,19 @@ export async function* runOpenAIResponses(
         }
         case 'response.completed': {
           completedResponse = event.response
+          if (
+            completedResponse &&
+            (!Array.isArray(completedResponse.output) ||
+              completedResponse.output.length === 0) &&
+            streamedOutputItems.size > 0
+          ) {
+            completedResponse = {
+              ...completedResponse,
+              output: [...streamedOutputItems.entries()]
+                .sort(([leftIndex], [rightIndex]) => leftIndex - rightIndex)
+                .map(([, item]) => item),
+            }
+          }
           yield createMessageStopStreamEvent()
           break
         }
