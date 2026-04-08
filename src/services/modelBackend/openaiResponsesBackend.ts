@@ -797,6 +797,7 @@ export async function* runOpenAIResponses(
     const streamedResponse = await streamResponse(url, request, params.signal)
     const outputIndexes = new Map<string, number>()
     const outputItemTypes = new Map<number, string>()
+    const streamedOutputItems = new Map<number, OpenAIResponseOutputItem>()
     // Preserve display-only native items across stream events so we can emit
     // low-noise progress summaries without changing who actually executes tools.
     const streamedNativeItems = new Map<
@@ -805,7 +806,9 @@ export async function* runOpenAIResponses(
     >()
     const streamedAnnotations = new Map<string, OpenAIResponseAnnotation[]>()
     const startedTextBlockIndexes = new Set<number>()
+    const streamedTextContentIndexes = new Set<number>()
     const startedThinkingBlockIndexes = new Set<number>()
+    const streamedThinkingContentIndexes = new Set<number>()
     const openToolUseBlockIndexes = new Set<number>()
     const streamedCompletedOutputItems = new Map<number, OpenAIResponseOutputItem>()
     const customToolInputStreamedIndexes = new Set<number>()
@@ -839,6 +842,9 @@ export async function* runOpenAIResponses(
           }
           if (event.item?.type) {
             outputItemTypes.set(index, event.item.type)
+          }
+          if (event.item) {
+            streamedOutputItems.set(index, event.item)
           }
 
           if (event.item?.type === 'function_call') {
@@ -901,6 +907,7 @@ export async function* runOpenAIResponses(
             startedTextBlockIndexes.add(index)
             yield createTextBlockStartStreamEvent(index)
           }
+          streamedTextContentIndexes.add(index)
           yield createTextDeltaStreamEvent(index, text)
           break
         }
@@ -924,6 +931,7 @@ export async function* runOpenAIResponses(
             startedTextBlockIndexes.add(index)
             yield createTextBlockStartStreamEvent(index)
           }
+          streamedTextContentIndexes.add(index)
           yield createTextDeltaStreamEvent(index, text)
           break
         }
@@ -941,6 +949,7 @@ export async function* runOpenAIResponses(
             startedTextBlockIndexes.add(index)
             yield createTextBlockStartStreamEvent(index)
           }
+          streamedTextContentIndexes.add(index)
           yield createTextDeltaStreamEvent(index, text)
           break
         }
@@ -952,6 +961,7 @@ export async function* runOpenAIResponses(
             startedTextBlockIndexes.add(index)
             yield createTextBlockStartStreamEvent(index)
           }
+          streamedTextContentIndexes.add(index)
           yield createTextDeltaStreamEvent(index, text)
           break
         }
@@ -985,6 +995,7 @@ export async function* runOpenAIResponses(
             startedThinkingBlockIndexes.add(index)
             yield createThinkingBlockStartStreamEvent(index)
           }
+          streamedThinkingContentIndexes.add(index)
           yield createThinkingDeltaStreamEvent(index, thinking)
           break
         }
@@ -1001,6 +1012,7 @@ export async function* runOpenAIResponses(
             startedThinkingBlockIndexes.add(index)
             yield createThinkingBlockStartStreamEvent(index)
           }
+          streamedThinkingContentIndexes.add(index)
           yield createThinkingDeltaStreamEvent(index, thinking)
           break
         }
@@ -1119,6 +1131,7 @@ export async function* runOpenAIResponses(
           const index = getOutputIndexForStreamEvent(event, outputIndexes)
           if (event.item) {
             streamedCompletedOutputItems.set(index, event.item)
+            streamedOutputItems.set(index, event.item)
           }
           if (event.item?.id) {
             outputIndexes.set(event.item.id, index)
@@ -1132,18 +1145,20 @@ export async function* runOpenAIResponses(
               event.item?.type === 'message'
                 ? extractOpenAIResponseMessageText(event.item)
                 : ''
-            if (text) {
+            if (text && !streamedTextContentIndexes.has(index)) {
               const streamEvents = startedTextBlockIndexes.has(index)
                 ? [createTextDeltaStreamEvent(index, text)]
                 : emitTextStreamEvent(index, text)
               if (streamEvents.length > 0) {
                 startedTextBlockIndexes.add(index)
+                streamedTextContentIndexes.add(index)
                 for (const streamEvent of streamEvents) {
                   yield streamEvent
                 }
               }
             }
             if (startedTextBlockIndexes.delete(index)) {
+              streamedTextContentIndexes.delete(index)
               yield createBlockStopStreamEvent(index)
             }
           } else if (itemType === 'reasoning') {
@@ -1151,18 +1166,20 @@ export async function* runOpenAIResponses(
               event.item?.type === 'reasoning'
                 ? extractOpenAIResponseReasoningText(event.item)
                 : ''
-            if (thinking) {
+            if (thinking && !streamedThinkingContentIndexes.has(index)) {
               const streamEvents = startedThinkingBlockIndexes.has(index)
                 ? [createThinkingDeltaStreamEvent(index, thinking)]
                 : emitThinkingStreamEvent(index, thinking)
               if (streamEvents.length > 0) {
                 startedThinkingBlockIndexes.add(index)
+                streamedThinkingContentIndexes.add(index)
                 for (const streamEvent of streamEvents) {
                   yield streamEvent
                 }
               }
             }
             if (startedThinkingBlockIndexes.delete(index)) {
+              streamedThinkingContentIndexes.delete(index)
               yield createBlockStopStreamEvent(index)
             }
           } else if (itemType === 'function_call') {
@@ -1227,6 +1244,19 @@ export async function* runOpenAIResponses(
         }
         case 'response.completed': {
           completedResponse = event.response
+          if (
+            completedResponse &&
+            (!Array.isArray(completedResponse.output) ||
+              completedResponse.output.length === 0) &&
+            streamedOutputItems.size > 0
+          ) {
+            completedResponse = {
+              ...completedResponse,
+              output: [...streamedOutputItems.entries()]
+                .sort(([leftIndex], [rightIndex]) => leftIndex - rightIndex)
+                .map(([, item]) => item),
+            }
+          }
           yield createMessageStopStreamEvent()
           break
         }

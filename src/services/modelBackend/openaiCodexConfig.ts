@@ -11,11 +11,11 @@ type CodexProviderConfig = {
   disableResponseStorage: boolean
   baseUrl: string
   wireApi: string
+  envKey: string
   requiresOpenAIAuth: boolean
   promptCacheRetention?: 'in_memory' | '24h'
   modelContextWindow?: number
   reasoningEffort?: OpenAIReasoningEffort
-  envKey?: string
   httpHeaders?: StringMap
   envHttpHeaders?: StringMap
   queryParams?: StringMap
@@ -42,6 +42,7 @@ let cachedAuthConfig: CodexAuthConfig | null | undefined
 
 const DEFAULT_MODEL = 'gpt-5.4'
 const DEFAULT_BASE_URL = 'https://api.openai.com/v1'
+const DEFAULT_ENV_KEY = 'OPENAI_API_KEY'
 
 function getCodexConfigPath(): string {
   return join(homedir(), '.codex', 'config.toml')
@@ -200,6 +201,22 @@ function normalizeBaseUrl(baseUrl: string | undefined): string {
   return trimmed
 }
 
+function normalizeEnvKey(envKey: string | undefined): string {
+  const trimmed = envKey?.trim()
+  return trimmed || DEFAULT_ENV_KEY
+}
+
+function getConfiguredApiKeyEnvNames(): string[] {
+  const configured = normalizeEnvKey(loadCodexProviderConfig().envKey)
+  return configured === DEFAULT_ENV_KEY
+    ? [DEFAULT_ENV_KEY]
+    : [configured, DEFAULT_ENV_KEY]
+}
+
+function getConfiguredAuthJsonKeyNames(): string[] {
+  return getConfiguredApiKeyEnvNames()
+}
+
 function getEffectiveProviderId(raw: string, profileSection: string): string {
   return (
     matchString(profileSection, /^\s*model_provider\s*=\s*"([^"]+)"/m) ||
@@ -225,11 +242,11 @@ export function loadCodexProviderConfig(): CodexProviderConfig {
       disableResponseStorage: true,
       baseUrl: DEFAULT_BASE_URL,
       wireApi: 'responses',
+      envKey: DEFAULT_ENV_KEY,
       requiresOpenAIAuth: false,
       promptCacheRetention: undefined,
       modelContextWindow: undefined,
       reasoningEffort: undefined,
-      envKey: undefined,
       httpHeaders: undefined,
       envHttpHeaders: undefined,
       queryParams: undefined,
@@ -293,7 +310,9 @@ export function loadCodexProviderConfig(): CodexProviderConfig {
         /^\s*model_reasoning_effort\s*=\s*"([^"]+)"/m,
       ),
   )
-  const envKey = matchString(providerSection, /^\s*env_key\s*=\s*"([^"]+)"/m)
+  const envKey = normalizeEnvKey(
+    matchString(providerSection, /^\s*env_key\s*=\s*"([^"]+)"/m),
+  )
   const httpHeaders = parseInlineStringMap(
     matchInlineTableBody(providerSection, 'http_headers'),
   )
@@ -346,17 +365,22 @@ export function loadCodexAuthConfig(): CodexAuthConfig {
   }
 
   try {
-    const parsed = JSON.parse(raw) as {
-      auth_mode?: string
-      OPENAI_API_KEY?: string
-    }
-    const authMode = normalizeAuthMode(parsed.auth_mode)
+    const parsed = JSON.parse(raw) as Record<string, unknown>
+    const authMode = normalizeAuthMode(
+      typeof parsed.auth_mode === 'string' ? parsed.auth_mode : undefined,
+    )
+    const openaiApiKey =
+      authMode === 'chatgpt' || authMode === 'chatgptAuthTokens'
+        ? undefined
+        : getConfiguredAuthJsonKeyNames()
+            .map(key => {
+              const value = parsed[key]
+              return typeof value === 'string' ? value.trim() : undefined
+            })
+            .find(value => Boolean(value))
     cachedAuthConfig = {
       authMode,
-      openaiApiKey:
-        authMode === 'chatgpt' || authMode === 'chatgptAuthTokens'
-          ? undefined
-          : parsed.OPENAI_API_KEY?.trim() || undefined,
+      openaiApiKey,
     }
     return cachedAuthConfig
   } catch {
@@ -366,23 +390,30 @@ export function loadCodexAuthConfig(): CodexAuthConfig {
 }
 
 export function getOpenAIApiKey(): string | undefined {
-  const envKey = process.env.OPENAI_API_KEY?.trim()
-  if (envKey) return envKey
-
-  const providerConfig = loadCodexProviderConfig()
-  const providerEnvKeyName = providerConfig.envKey?.trim()
-  if (providerEnvKeyName) {
-    const providerEnvKey = process.env[providerEnvKeyName]?.trim()
-    if (providerEnvKey) {
-      return providerEnvKey
-    }
+  for (const envName of getConfiguredApiKeyEnvNames()) {
+    const envKey = process.env[envName]?.trim()
+    if (envKey) return envKey
   }
 
+  const providerConfig = loadCodexProviderConfig()
   if (providerConfig.experimentalBearerToken?.trim()) {
     return providerConfig.experimentalBearerToken.trim()
   }
 
   return loadCodexAuthConfig().openaiApiKey
+}
+
+export function resolveOpenAIApiKeyEnvKey(): string {
+  return loadCodexProviderConfig().envKey
+}
+
+export function describeOpenAIApiKeySources(): string {
+  const envNames = getConfiguredApiKeyEnvNames()
+  return [...envNames, '~/.codex/auth.json'].join(' or ')
+}
+
+export function getMissingOpenAIApiKeyMessage(): string {
+  return `No OpenAI/Codex API key is configured. Expected ${describeOpenAIApiKeySources()}.`
 }
 
 export function resolveOpenAIBaseUrl(): string {

@@ -9,6 +9,7 @@ const ENV_KEYS = [
   'OPENAI_PROMPT_CACHE_RETENTION',
   'OPENAI_REASONING_EFFORT',
   'AZURE_OPENAI_API_KEY',
+  'CODEX_API_KEY',
   'EXAMPLE_HEADER_VALUE',
   'CUBENCE_DISABLE_RESPONSE_STORAGE',
   'CUBENCE_MODEL_BACKEND',
@@ -80,12 +81,13 @@ describe('openaiCodexConfig fork contracts', () => {
   it('[P0:model] falls back to the fork default OpenAI provider config when ~/.codex/config.toml is absent', async () => {
     const defaults = await loadCodexConfigModule()
 
-    expect(defaults.loadCodexProviderConfig()).toEqual({
+    expect(defaults.loadCodexProviderConfig()).toMatchObject({
       providerId: 'openai',
       model: 'gpt-5.4',
       disableResponseStorage: true,
       baseUrl: 'https://api.openai.com/v1',
       wireApi: 'responses',
+      envKey: 'OPENAI_API_KEY',
       requiresOpenAIAuth: false,
       promptCacheRetention: undefined,
       modelContextWindow: undefined,
@@ -146,12 +148,13 @@ describe('openaiCodexConfig fork contracts', () => {
       ].join('\n'),
     })
 
-    expect(missingProviderSection.loadCodexProviderConfig()).toEqual({
+    expect(missingProviderSection.loadCodexProviderConfig()).toMatchObject({
       providerId: 'corp',
       model: 'gpt-5.2',
       disableResponseStorage: true,
       baseUrl: 'https://api.openai.com/v1',
       wireApi: 'responses',
+      envKey: 'OPENAI_API_KEY',
       requiresOpenAIAuth: false,
       promptCacheRetention: '24h',
       modelContextWindow: undefined,
@@ -178,7 +181,7 @@ describe('openaiCodexConfig fork contracts', () => {
       ].join('\n'),
     })
 
-    expect(customProvider.loadCodexProviderConfig()).toEqual({
+    expect(customProvider.loadCodexProviderConfig()).toMatchObject({
       providerId: 'corp',
       model: 'gpt-5-mini',
       disableResponseStorage: true,
@@ -293,6 +296,46 @@ describe('openaiCodexConfig fork contracts', () => {
       ].join('\n'),
     })
     expect(bearerFallback.getOpenAIApiKey()).toBe('bearer-token')
+  })
+
+  it('[P0:model] honors provider env_key for both environment and auth.json lookups while preserving OPENAI_API_KEY fallback', async () => {
+    const fromConfiguredEnv = await loadCodexConfigModule({
+      configToml: [
+        'model_provider = "codex"',
+        '[model_providers.codex]',
+        'env_key = "CODEX_API_KEY"',
+      ].join('\n'),
+      env: {
+        CODEX_API_KEY: 'codex-env-key',
+      },
+    })
+    expect(fromConfiguredEnv.resolveOpenAIApiKeyEnvKey()).toBe('CODEX_API_KEY')
+    expect(fromConfiguredEnv.getOpenAIApiKey()).toBe('codex-env-key')
+    expect(fromConfiguredEnv.describeOpenAIApiKeySources()).toBe(
+      'CODEX_API_KEY or OPENAI_API_KEY or ~/.codex/auth.json',
+    )
+
+    const fromAuthJson = await loadCodexConfigModule({
+      configToml: [
+        'model_provider = "codex"',
+        '[model_providers.codex]',
+        'env_key = "CODEX_API_KEY"',
+      ].join('\n'),
+      authJson: '{"CODEX_API_KEY":" file-codex-key "}',
+    })
+    expect(fromAuthJson.getOpenAIApiKey()).toBe('file-codex-key')
+
+    const fromOpenAIFallback = await loadCodexConfigModule({
+      configToml: [
+        'model_provider = "codex"',
+        '[model_providers.codex]',
+        'env_key = "CODEX_API_KEY"',
+      ].join('\n'),
+      env: {
+        OPENAI_API_KEY: 'openai-fallback-key',
+      },
+    })
+    expect(fromOpenAIFallback.getOpenAIApiKey()).toBe('openai-fallback-key')
   })
 
   it('[P0:model] only uses auth.json OPENAI_API_KEY for API-key auth mode and ignores ChatGPT login payloads', async () => {

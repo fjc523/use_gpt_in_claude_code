@@ -2,7 +2,7 @@ import chalk from 'chalk';
 import figures from 'figures';
 import * as React from 'react';
 import { color, Text } from '../ink.js';
-import { loadCodexAuthConfig, loadCodexProviderConfig, resolveOpenAIBaseUrl, resolveOpenAIModel, isOpenAIResponsesBackendEnabled } from '../services/modelBackend/openaiCodexConfig.js';
+import { loadCodexAuthConfig, loadCodexProviderConfig, resolveOpenAIBaseUrl, resolveOpenAIModel, isOpenAIResponsesBackendEnabled, resolveOpenAIApiKeyEnvKey } from '../services/modelBackend/openaiCodexConfig.js';
 import type { MCPServerConnection } from '../services/mcp/types.js';
 import { getAccountInformation, isClaudeAISubscriber } from './auth.js';
 import { getLargeMemoryFiles, getMemoryFiles, MAX_MEMORY_CHARACTER_COUNT } from './claudemd.js';
@@ -201,8 +201,12 @@ export async function buildInstallationHealthDiagnostics(): Promise<Diagnostic[]
 export function buildAccountProperties(): Property[] {
   if (isOpenAIResponsesBackendEnabled()) {
     const auth = loadCodexAuthConfig()
-    const apiKeySource = process.env.OPENAI_API_KEY?.trim()
-      ? 'OPENAI_API_KEY'
+    const configuredEnvKey = resolveOpenAIApiKeyEnvKey()
+    const apiKeySource = process.env[configuredEnvKey]?.trim()
+      ? configuredEnvKey
+      : configuredEnvKey !== 'OPENAI_API_KEY' &&
+          process.env.OPENAI_API_KEY?.trim()
+        ? 'OPENAI_API_KEY'
       : auth.openaiApiKey
         ? '~/.codex/auth.json'
         : 'not configured'
