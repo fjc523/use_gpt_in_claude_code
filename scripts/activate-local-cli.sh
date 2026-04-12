@@ -10,7 +10,7 @@ if [[ ! -x "$CLI_PATH" ]]; then
 fi
 
 TARGET_DIR="/opt/homebrew/bin"
-ACTIVE_LINK="$TARGET_DIR/claude"
+ACTIVE_LINK="$TARGET_DIR/claudex-local"
 FORK_LINK="$TARGET_DIR/claude-codex"
 BACKUP_LINK="$TARGET_DIR/claude-official"
 

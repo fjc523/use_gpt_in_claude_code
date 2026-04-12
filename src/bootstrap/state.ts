@@ -201,6 +201,8 @@ type State = {
   isRemoteMode: boolean
   // Ant prompt mode (--ant flag or /ant toggle)
   antPromptMode: boolean
+  // Opus prompt mode (--opus flag or /opus toggle)
+  opusPromptMode: boolean
   // Direct connect server URL (for display in header)
   directConnectServerUrl: string | undefined
   // System prompt section cache state
@@ -396,6 +398,8 @@ function getInitialState(): State {
     isRemoteMode: false,
     // Ant prompt mode
     antPromptMode: false,
+    // Opus prompt mode
+    opusPromptMode: false,
     ...(process.env.USER_TYPE === 'ant'
       ? {
           replBridgeActive: false,
@@ -1658,6 +1662,14 @@ export function getAntPromptMode(): boolean {
 
 export function setAntPromptMode(value: boolean): void {
   STATE.antPromptMode = value
+}
+
+export function getOpusPromptMode(): boolean {
+  return STATE.opusPromptMode
+}
+
+export function setOpusPromptMode(value: boolean): void {
+  STATE.opusPromptMode = value
 }
 
 // System prompt section accessors

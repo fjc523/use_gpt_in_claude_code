@@ -55,7 +55,35 @@ claudex --ant
 /ant
 ```
 
-## 3. Telegram 通知功能
+## 3. opus 模式
+
+opus 模式让 gpt 输出更接近 opus 风格：更深分析、更强结构、更高主动性。
+
+它叠加在 ant 之上，不替代 ant 已有的约束。核心行为：
+
+- 非 trivial 任务先给短计划再动手
+- 偏好最小可 review 的 diff
+- 常规可逆步骤默认继续，不频繁确认
+- 收尾默认给出：what changed / assumptions or risks / checks run
+- 输出简洁、结论先行、短句优先
+
+```bash
+claudex --opus
+```
+
+或者在session内：
+
+```text
+/opus
+```
+
+推荐同时开启 ant + opus：
+
+```bash
+claudex --ant --opus
+```
+
+## 4. Telegram 通知功能
 
 如果你想在任务完成、需要人工输入或出现失败时收到 Telegram 通知，需要准备：
 
