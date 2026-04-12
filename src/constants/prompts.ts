@@ -5,6 +5,7 @@ import { env } from '../utils/env.js'
 import { getIsGit } from '../utils/git.js'
 import { getCwd } from '../utils/cwd.js'
 import { getIsNonInteractiveSession } from '../bootstrap/state.js'
+import { getAntPromptMode } from '../bootstrap/state.js'
 import { getCurrentWorktreeSession } from '../utils/worktree.js'
 import { getSessionStartDate } from './common.js'
 import { getInitialSettings } from '../utils/settings/settings.js'
@@ -145,6 +146,7 @@ function getCliHelpName(): string {
 
 function isAntPromptVariant(): boolean {
   return (
+    getAntPromptMode() ||
     process.env.USER_TYPE === 'ant' ||
     process.env.CLAUDE_CODE_PROMPT_VARIANT === 'ant'
   )
@@ -572,7 +574,7 @@ ${CYBER_RISK_INSTRUCTION}`,
     ),
     // Numeric length anchors — research shows ~1.2% output token reduction vs
     // qualitative "be concise". Ant-only to measure quality impact first.
-    ...(process.env.USER_TYPE === 'ant'
+    ...(getAntPromptMode() || process.env.USER_TYPE === 'ant'
       ? [
           systemPromptSection(
             'numeric_length_anchors',

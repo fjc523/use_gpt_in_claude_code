@@ -197,6 +197,8 @@ type State = {
   mainThreadAgentType: string | undefined
   // Remote mode (--remote flag)
   isRemoteMode: boolean
+  // Ant prompt mode (--ant flag or /ant toggle)
+  antPromptMode: boolean
   // Direct connect server URL (for display in header)
   directConnectServerUrl: string | undefined
   // System prompt section cache state
@@ -388,6 +390,8 @@ function getInitialState(): State {
     mainThreadAgentType: undefined,
     // Remote mode
     isRemoteMode: false,
+    // Ant prompt mode
+    antPromptMode: false,
     ...(process.env.USER_TYPE === 'ant'
       ? {
           replBridgeActive: false,
@@ -1634,6 +1638,14 @@ export function getIsRemoteMode(): boolean {
 
 export function setIsRemoteMode(value: boolean): void {
   STATE.isRemoteMode = value
+}
+
+export function getAntPromptMode(): boolean {
+  return STATE.antPromptMode
+}
+
+export function setAntPromptMode(value: boolean): void {
+  STATE.antPromptMode = value
 }
 
 // System prompt section accessors

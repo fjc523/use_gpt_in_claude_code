@@ -4,13 +4,12 @@ This file provides guidance to Claude Code when working with code in this reposi
 
 ## Repo-specific workflow
 - Keep `.claude/` ignored and do not commit it.
-- After changing TypeScript/runtime code, rebuild once with `npm run build`; it now refreshes both the default bundle in `dist/` and the prompt-only ant variant in `dist-ant/`.
+- After changing TypeScript/runtime code, rebuild once with `npm run build`.
 - Docs-only changes do not require a rebuild.
-- Use `npm run build:ant` when you only want to refresh the isolated ant-style bundle in `dist-ant/`.
-- Use `npm run activate-ant-cli` to install the sidecar launcher command `claude-codex-ant` without changing the existing `claude` / `claude-codex` links.
 - This fork is meant to run from source. Do not rely on official Anthropic install/update flows in this repo.
 - All release, npm publish, tag, and GitHub Release work must follow `docs/release-version-policy.md`.
 - Treat `package.json.version` as the only authoritative release version; do not introduce or preserve a second formal version source in scripts, CI, or release notes.
+- Ant prompt mode is a runtime toggle: use `--ant` flag at startup or `/ant` command mid-session. No separate build required.
 
 ## Common commands
 - Install dependencies: `npm install`
