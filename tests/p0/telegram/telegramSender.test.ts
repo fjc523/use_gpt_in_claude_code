@@ -16,7 +16,7 @@ describe('telegram/sender', () => {
     expect(await sendTelegramMessage('test')).toBe(false)
   })
 
-  it('sendTelegramMessage returns false when disabled', async () => {
+  it('sendTelegramMessage returns false when disabled in legacy config', async () => {
     vi.doMock('src/services/telegram/config.js', () => ({
       readTelegramConfig: () => ({
         botToken: 'tok',

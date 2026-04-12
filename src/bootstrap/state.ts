@@ -131,6 +131,8 @@ type State = {
   useCoworkPlugins: boolean
   // Session-only bypass permissions mode flag (not persisted)
   sessionBypassPermissionsMode: boolean
+  // Session-only Telegram notification toggle. Default true for backward compatibility.
+  sessionTelegramNotificationsEnabled: boolean
   // Session-only flag gating the .claude/scheduled_tasks.json watcher
   // (useScheduledTasks). Set by cronScheduler.start() when the JSON has
   // entries, or by CronCreateTool. Not persisted.
@@ -357,6 +359,8 @@ function getInitialState(): State {
     useCoworkPlugins: false,
     // Session-only bypass permissions mode flag (not persisted)
     sessionBypassPermissionsMode: false,
+    // Session-only Telegram notifications start enabled unless toggled off in this process
+    sessionTelegramNotificationsEnabled: true,
     // Scheduled tasks disabled until flag or dialog enables them
     scheduledTasksEnabled: false,
     sessionCronTasks: [],
@@ -1271,6 +1275,14 @@ export function setSessionBypassPermissionsMode(enabled: boolean): void {
 
 export function getSessionBypassPermissionsMode(): boolean {
   return STATE.sessionBypassPermissionsMode
+}
+
+export function setSessionTelegramNotificationsEnabled(enabled: boolean): void {
+  STATE.sessionTelegramNotificationsEnabled = enabled
+}
+
+export function getSessionTelegramNotificationsEnabled(): boolean {
+  return STATE.sessionTelegramNotificationsEnabled
 }
 
 export function setScheduledTasksEnabled(enabled: boolean): void {

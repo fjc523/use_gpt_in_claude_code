@@ -397,6 +397,10 @@ export type GlobalConfig = {
   inputNeededNotifEnabled?: boolean
   agentPushNotifEnabled?: boolean
 
+  // Telegram notification toggle (global, persisted across sessions).
+  // Undefined means "default on if configured" for backward compatibility.
+  telegramNotificationsEnabled?: boolean
+
   // Claude Code usage tracking
   claudeCodeFirstTokenDate?: string // ISO timestamp of the user's first Claude Code OAuth token
 
@@ -655,6 +659,7 @@ export const GLOBAL_CONFIG_KEYS = [
   'taskCompleteNotifEnabled',
   'inputNeededNotifEnabled',
   'agentPushNotifEnabled',
+  'telegramNotificationsEnabled',
   'respectGitignore',
   'claudeInChromeDefaultEnabled',
   'hasCompletedClaudeInChromeOnboarding',

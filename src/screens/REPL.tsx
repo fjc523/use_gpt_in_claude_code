@@ -26,7 +26,7 @@ import * as React from 'react';
 import { useEffect, useMemo, useRef, useState, useCallback, useDeferredValue, useLayoutEffect, type RefObject } from 'react';
 import { useNotifications } from '../context/notifications.js';
 import { sendNotification } from '../services/notifier.js';
-import { isTelegramConfigured } from '../services/telegram/config.js';
+import { shouldSendTelegramNotifications } from '../services/telegram/config.js';
 import { sendTelegramMessage } from '../services/telegram/sender.js';
 import { getLastInteractionTime } from '../bootstrap/state.js';
 import { startPreventSleep, stopPreventSleep } from '../services/preventSleep.js';
@@ -2935,7 +2935,7 @@ export function REPL({
 
         // Send Telegram notification on turn complete (not aborted),
         // but only if user has been idle for >15s (skip quick interactions like /clear)
-        if (!abortController.signal.aborted && isTelegramConfigured()) {
+        if (!abortController.signal.aborted && shouldSendTelegramNotifications()) {
           const idleSinceLastInput = Date.now() - getLastInteractionTime();
           if (idleSinceLastInput > 15_000) {
             void sendTelegramMessage('Claude Code: task completed, waiting for your input.');

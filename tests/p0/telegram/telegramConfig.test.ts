@@ -4,6 +4,14 @@ import type { TelegramConfig } from 'src/services/telegram/config.js'
 const mockReadFileSync = vi.fn()
 const mockWriteFileSync = vi.fn()
 const mockUnlinkSync = vi.fn()
+const mockGetSessionTelegramNotificationsEnabled = vi.fn(() => true)
+const mockGetGlobalConfig = vi.fn(() => ({ telegramNotificationsEnabled: undefined }))
+const mockSaveGlobalConfig = vi.fn(
+  (updater: (current: { telegramNotificationsEnabled?: boolean }) => { telegramNotificationsEnabled?: boolean }) => {
+    const next = updater(mockGetGlobalConfig())
+    mockGetGlobalConfig.mockReturnValue(next)
+  },
+)
 
 vi.mock('fs', () => ({
   chmodSync: vi.fn(),
@@ -21,6 +29,17 @@ vi.mock('src/utils/errors.js', () => ({
   getErrnoCode: (e: unknown) => (e as { code?: string })?.code,
 }))
 
+vi.mock('src/bootstrap/state.js', () => ({
+  getSessionTelegramNotificationsEnabled: () =>
+    mockGetSessionTelegramNotificationsEnabled(),
+}))
+
+vi.mock('src/utils/config.js', () => ({
+  getGlobalConfig: () => mockGetGlobalConfig(),
+  saveGlobalConfig: (updater: (current: { telegramNotificationsEnabled?: boolean }) => { telegramNotificationsEnabled?: boolean }) =>
+    mockSaveGlobalConfig(updater),
+}))
+
 describe('telegram/config', () => {
   const ORIGINAL_TOKEN = process.env.TELEGRAM_BOT_TOKEN
   const ORIGINAL_CHAT = process.env.TELEGRAM_CHAT_ID
@@ -29,6 +48,8 @@ describe('telegram/config', () => {
     delete process.env.TELEGRAM_BOT_TOKEN
     delete process.env.TELEGRAM_CHAT_ID
     vi.clearAllMocks()
+    mockGetSessionTelegramNotificationsEnabled.mockReturnValue(true)
+    mockGetGlobalConfig.mockReturnValue({ telegramNotificationsEnabled: undefined })
   })
 
   afterEach(() => {
@@ -54,7 +75,6 @@ describe('telegram/config', () => {
     mockReadFileSync.mockReturnValue(
       JSON.stringify({ botToken: 'file-token', chatId: 'file-chat', enabled: true }),
     )
-    // Re-import to pick up fresh env
     vi.resetModules()
     const { readTelegramConfig } = await import(
       'src/services/telegram/config.js'
@@ -81,18 +101,18 @@ describe('telegram/config', () => {
     expect(readTelegramConfig()).toEqual(stored)
   })
 
-  it('isTelegramConfigured returns false when not configured', async () => {
+  it('hasTelegramCredentials returns false when not configured', async () => {
     mockReadFileSync.mockImplementation(() => {
       throw new Error('ENOENT')
     })
     vi.resetModules()
-    const { isTelegramConfigured } = await import(
+    const { hasTelegramCredentials } = await import(
       'src/services/telegram/config.js'
     )
-    expect(isTelegramConfigured()).toBe(false)
+    expect(hasTelegramCredentials()).toBe(false)
   })
 
-  it('isTelegramConfigured returns false when disabled', async () => {
+  it('isTelegramConfigured returns false when legacy config is disabled', async () => {
     mockReadFileSync.mockReturnValue(
       JSON.stringify({ botToken: 'tok', chatId: '123', enabled: false }),
     )
@@ -103,7 +123,40 @@ describe('telegram/config', () => {
     expect(isTelegramConfigured()).toBe(false)
   })
 
-  it('isTelegramConfigured returns true when properly configured', async () => {
+  it('shouldSendTelegramNotifications returns false when session toggle is off', async () => {
+    mockReadFileSync.mockReturnValue(
+      JSON.stringify({ botToken: 'tok', chatId: '123', enabled: true }),
+    )
+    mockGetSessionTelegramNotificationsEnabled.mockReturnValue(false)
+    vi.resetModules()
+    const { shouldSendTelegramNotifications } = await import(
+      'src/services/telegram/config.js'
+    )
+    expect(shouldSendTelegramNotifications()).toBe(false)
+  })
+
+  it('global toggle overrides env var credentials', async () => {
+    process.env.TELEGRAM_BOT_TOKEN = 'env-token'
+    process.env.TELEGRAM_CHAT_ID = 'env-chat'
+    mockGetGlobalConfig.mockReturnValue({ telegramNotificationsEnabled: false })
+    vi.resetModules()
+    const { shouldSendTelegramNotifications } = await import(
+      'src/services/telegram/config.js'
+    )
+    expect(shouldSendTelegramNotifications()).toBe(false)
+  })
+
+  it('setTelegramGloballyEnabled persists the global toggle', async () => {
+    vi.resetModules()
+    const { setTelegramGloballyEnabled, isTelegramGloballyEnabled } = await import(
+      'src/services/telegram/config.js'
+    )
+    setTelegramGloballyEnabled(false)
+    expect(mockSaveGlobalConfig).toHaveBeenCalled()
+    expect(isTelegramGloballyEnabled()).toBe(false)
+  })
+
+  it('isTelegramConfigured returns true when properly configured and globally enabled', async () => {
     mockReadFileSync.mockReturnValue(
       JSON.stringify({ botToken: 'tok', chatId: '123', enabled: true }),
     )
