@@ -66,7 +66,23 @@ vi.mock('../../../src/utils/messages.js', () => ({
     createAssistantAPIErrorMessageMock(...args),
   getMessagesAfterCompactBoundary: (messages: unknown[]) => messages,
   createToolUseSummaryMessage: vi.fn(),
-  createMicrocompactBoundaryMessage: vi.fn(),
+  createMicrocompactBoundaryMessage: vi.fn(
+    (
+      trigger: string,
+      preTokens: number,
+      tokensSaved: number,
+      compactedToolIds: string[],
+      clearedAttachmentUUIDs: string[],
+    ) => ({
+      type: 'system',
+      subtype: 'microcompact_boundary',
+      trigger,
+      preTokens,
+      tokensSaved,
+      compactedToolIds,
+      clearedAttachmentUUIDs,
+    }),
+  ),
   stripSignatureBlocks: (messages: unknown[]) => messages,
   createAttachmentMessage: vi.fn((attachment: unknown) => ({
     type: 'attachment',
@@ -189,7 +205,10 @@ vi.mock('../../../src/services/tools/toolOrchestration.js', () => ({
   runTools: async function* () {},
 }))
 vi.mock('../../../src/utils/toolResultStorage.js', () => ({
-  applyToolResultBudget: async (messages: unknown[]) => messages,
+  applyToolResultBudget: async (messages: unknown[]) => ({
+    messages,
+    invalidatedNativeContinuation: false,
+  }),
 }))
 vi.mock('../../../src/utils/sessionStorage.js', () => ({
   recordContentReplacement: vi.fn(),
@@ -395,5 +414,63 @@ describe('query recoverable interruption retry', () => {
     expect(callModelMock).toHaveBeenCalledTimes(2)
     expect(createUserMessageMock).toHaveBeenCalledTimes(1)
     expect(outputs.some(output => output?.isApiErrorMessage)).toBe(false)
+  })
+
+  it('[P0:model] injects an invisible continuity boundary before the model call when microcompact invalidates native replay state', async () => {
+    callModelMock.mockImplementationOnce(async function* () {
+      yield {
+        type: 'assistant',
+        message: {
+          role: 'assistant',
+          model: 'mock-model',
+          usage: { input_tokens: 1, output_tokens: 1 },
+          content: [{ type: 'text', text: 'done' }],
+        },
+      }
+    })
+
+    const outputs = await collect(
+      query({
+        messages: [{ type: 'user', message: { content: 'hello' } }] as any,
+        systemPrompt: ['system'] as any,
+        userContext: {},
+        systemContext: {},
+        canUseTool: vi.fn(),
+        toolUseContext: makeToolUseContext(),
+        querySource: 'repl_main_thread',
+        deps: {
+          callModel: callModelMock,
+          microcompact: async messages => ({
+            messages,
+            compactionInfo: {
+              continuityBoundary: {
+                trigger: 'auto',
+                tokensSaved: 42,
+                compactedToolIds: ['tool-1'],
+                clearedAttachmentUUIDs: [],
+              },
+            },
+          }),
+          autocompact: async () => ({
+            compactionResult: null,
+            consecutiveFailures: undefined,
+          }),
+          uuid: () => 'uuid-1',
+        },
+      }),
+    )
+
+    expect(outputs).toContainEqual(
+      expect.objectContaining({
+        type: 'system',
+        subtype: 'microcompact_boundary',
+        tokensSaved: 42,
+      }),
+    )
+    expect(callModelMock).toHaveBeenCalledTimes(1)
+    expect(callModelMock.mock.calls[0]![0].messages.at(-1)).toMatchObject({
+      type: 'system',
+      subtype: 'microcompact_boundary',
+    })
   })
 })

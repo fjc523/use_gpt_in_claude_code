@@ -425,7 +425,8 @@ async function* queryLoop(
     const persistReplacements =
       querySource.startsWith('agent:') ||
       querySource.startsWith('repl_main_thread')
-    messagesForQuery = await applyToolResultBudget(
+    const messagesBeforeToolResultBudget = messagesForQuery
+    const toolResultBudgetResult = await applyToolResultBudget(
       messagesForQuery,
       toolUseContext.contentReplacementState,
       persistReplacements
@@ -441,6 +442,19 @@ async function* queryLoop(
           .map(t => t.name),
       ),
     )
+    messagesForQuery = toolResultBudgetResult.messages
+    if (toolResultBudgetResult.invalidatedNativeContinuation) {
+      const preTokens = tokenCountWithEstimation(messagesBeforeToolResultBudget)
+      const continuityBoundary = createMicrocompactBoundaryMessage(
+        'auto',
+        preTokens,
+        Math.max(0, preTokens - tokenCountWithEstimation(messagesForQuery)),
+        [],
+        [],
+      )
+      messagesForQuery = [...messagesForQuery, continuityBoundary]
+      yield continuityBoundary
+    }
 
     // Apply snip before microcompact (both may run — they are not mutually exclusive).
     // snipTokensFreed is plumbed to autocompact so its threshold check reflects
@@ -460,18 +474,26 @@ async function* queryLoop(
 
     // Apply microcompact before autocompact
     queryCheckpoint('query_microcompact_start')
+    const messagesBeforeMicrocompact = messagesForQuery
     const microcompactResult = await deps.microcompact(
       messagesForQuery,
       toolUseContext,
       querySource,
     )
     messagesForQuery = microcompactResult.messages
-    // For cached microcompact (cache editing), defer boundary message until after
-    // the API response so we can use actual cache_deleted_input_tokens.
-    // Gated behind feature() so the string is eliminated from external builds.
-    const pendingCacheEdits = feature('CACHED_MICROCOMPACT')
-      ? microcompactResult.compactionInfo?.pendingCacheEdits
-      : undefined
+    const continuityBoundaryInfo =
+      microcompactResult.compactionInfo?.continuityBoundary
+    if (continuityBoundaryInfo) {
+      const continuityBoundary = createMicrocompactBoundaryMessage(
+        continuityBoundaryInfo.trigger,
+        tokenCountWithEstimation(messagesBeforeMicrocompact),
+        continuityBoundaryInfo.tokensSaved,
+        continuityBoundaryInfo.compactedToolIds,
+        continuityBoundaryInfo.clearedAttachmentUUIDs,
+      )
+      messagesForQuery = [...messagesForQuery, continuityBoundary]
+      yield continuityBoundary
+    }
     queryCheckpoint('query_microcompact_end')
 
     // Project the collapsed context view and maybe commit more collapses.
@@ -915,33 +937,6 @@ async function* queryLoop(
           }
           queryCheckpoint('query_api_streaming_end')
 
-          // Yield deferred microcompact boundary message using actual API-reported
-          // token deletion count instead of client-side estimates.
-          // Entire block gated behind feature() so the excluded string
-          // is eliminated from external builds.
-          if (feature('CACHED_MICROCOMPACT') && pendingCacheEdits) {
-            const lastAssistant = assistantMessages.at(-1)
-            // The API field is cumulative/sticky across requests, so we
-            // subtract the baseline captured before this request to get the delta.
-            const usage = lastAssistant?.message.usage
-            const cumulativeDeleted = usage
-              ? ((usage as unknown as Record<string, number>)
-                  .cache_deleted_input_tokens ?? 0)
-              : 0
-            const deletedTokens = Math.max(
-              0,
-              cumulativeDeleted - pendingCacheEdits.baselineCacheDeletedTokens,
-            )
-            if (deletedTokens > 0) {
-              yield createMicrocompactBoundaryMessage(
-                pendingCacheEdits.trigger,
-                0,
-                deletedTokens,
-                pendingCacheEdits.deletedToolIds,
-                [],
-              )
-            }
-          }
         } catch (innerError) {
           if (innerError instanceof FallbackTriggeredError && fallbackModel) {
             // Fallback was triggered - switch model and retry

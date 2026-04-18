@@ -215,6 +215,120 @@ function buildInput(messages: Message[]): {
   }
 }
 
+type ResponsesRequestMode = 'replay' | 'native'
+
+type ResponsesRequestVariant = {
+  mode: ResponsesRequestMode
+  request: Record<string, unknown>
+  inputCount: number
+  previousResponseId?: string
+  reason?: string
+}
+
+type ResponsesInputPlan = {
+  mode: ResponsesRequestMode
+  input: OpenAIInputItem[]
+  previousResponseId?: string
+  replayInput: OpenAIInputItem[]
+  reason: string
+}
+
+function isResponsesContinuityBoundaryMessage(message: Message): boolean {
+  if (message.type !== 'system') {
+    return false
+  }
+
+  const subtype = (message as { subtype?: unknown }).subtype
+  return (
+    subtype === 'compact_boundary' || subtype === 'microcompact_boundary'
+  )
+}
+
+function findLastResponsesContinuityBoundaryIndex(messages: Message[]): number {
+  for (let index = messages.length - 1; index >= 0; index--) {
+    if (isResponsesContinuityBoundaryMessage(messages[index]!)) {
+      return index
+    }
+  }
+
+  return -1
+}
+
+function findLastChainableAssistantResponse(
+  messages: Message[],
+  startIndex: number,
+): { index: number; requestId: string } | undefined {
+  for (let index = messages.length - 1; index >= startIndex; index--) {
+    const message = messages[index]
+    if (message?.type !== 'assistant' || message.isApiErrorMessage) {
+      continue
+    }
+
+    const requestId =
+      typeof message.requestId === 'string' ? message.requestId.trim() : ''
+    if (requestId) {
+      return {
+        index,
+        requestId,
+      }
+    }
+  }
+
+  return undefined
+}
+
+function buildResponsesInputPlan(messages: Message[], store: boolean): ResponsesInputPlan {
+  const replayInput = buildInput(messages).input
+
+  if (!store) {
+    return {
+      mode: 'replay',
+      input: replayInput,
+      replayInput,
+      reason: 'response_storage_disabled',
+    }
+  }
+
+  const windowStart = findLastResponsesContinuityBoundaryIndex(messages) + 1
+  const anchor = findLastChainableAssistantResponse(messages, windowStart)
+  if (!anchor) {
+    return {
+      mode: 'replay',
+      input: replayInput,
+      replayInput,
+      reason: 'no_prior_response_after_boundary',
+    }
+  }
+
+  const continuationMessages = messages.slice(anchor.index + 1)
+  if (continuationMessages.some(message => message.type === 'assistant')) {
+    return {
+      mode: 'replay',
+      input: replayInput,
+      replayInput,
+      reason: 'assistant_divergence_after_anchor',
+    }
+  }
+
+  const continuationInput = buildInput(continuationMessages).input
+  if (continuationInput.length === 0) {
+    return {
+      mode: 'replay',
+      input: replayInput,
+      replayInput,
+      reason: 'empty_incremental_input',
+    }
+  }
+
+  return {
+    mode: 'native',
+    input: continuationInput,
+    previousResponseId: anchor.requestId,
+    replayInput,
+    reason: 'previous_response_id',
+  }
+}
+
 function mapUsage(usage: OpenAIResponse['usage']) {
   if (!usage) return undefined
   const cachedTokens = usage.input_tokens_details?.cached_tokens ?? 0
@@ -576,37 +690,38 @@ function synthesizeResponseFromStream({
 
 async function createResponsesRequest(params: StreamTurnParams): Promise<{
   url: string
-  request: Record<string, unknown>
   model: string
+  primary: ResponsesRequestVariant
+  fallbackReplay?: ResponsesRequestVariant
 }> {
   const model = resolveOpenAIModel(params.options.model)
-  const { input } = buildInput(params.messages)
   const effort = resolveAppliedEffort(model, params.options.effortValue)
   const promptCacheRetention = resolveOpenAIPromptCacheRetention()
+  const storeResponses = shouldStoreOpenAIResponses()
+  const inputPlan = buildResponsesInputPlan(params.messages, storeResponses)
   const serializedTools = await Promise.all(
     params.tools.map(tool => mapToolToOpenAIFunction(tool)),
   )
 
-  const request: Record<string, unknown> = {
+  const requestBase: Record<string, unknown> = {
     model,
     instructions: params.systemPrompt.join('\n'),
-    input,
-    store: shouldStoreOpenAIResponses(),
+    store: storeResponses,
     // Keep repeated turns in the same session sticky to the same cache shard.
     prompt_cache_key: getPromptCacheKey(),
   }
 
   if (serializedTools.length > 0) {
-    request.tools = serializedTools
+    requestBase.tools = serializedTools
     if (params.options.toolChoice?.type === 'tool') {
-      request.tool_choice = {
+      requestBase.tool_choice = {
         type: 'function',
         name: params.options.toolChoice.name,
       }
     } else {
-      request.tool_choice = 'auto'
+      requestBase.tool_choice = 'auto'
     }
-    request.parallel_tool_calls = true
+    requestBase.parallel_tool_calls = true
   }
 
   if (params.options.outputFormat) {
@@ -621,7 +736,7 @@ async function createResponsesRequest(params: StreamTurnParams): Promise<{
         strictCompatibilityError,
       )
     }
-    request.text = {
+    requestBase.text = {
       format: {
         type: 'json_schema',
         name: 'claude_code_output_schema',
@@ -632,26 +747,60 @@ async function createResponsesRequest(params: StreamTurnParams): Promise<{
   }
 
   if (promptCacheRetention) {
-    request.prompt_cache_retention = promptCacheRetention
+    requestBase.prompt_cache_retention = promptCacheRetention
   }
 
   if (params.options.maxOutputTokensOverride) {
-    request.max_output_tokens = params.options.maxOutputTokensOverride
+    requestBase.max_output_tokens = params.options.maxOutputTokensOverride
   }
   if (effort !== undefined) {
-    request.reasoning = {
+    requestBase.reasoning = {
       effort: convertEffortValueToLevel(effort),
     }
   }
+
+  const primary: ResponsesRequestVariant = {
+    mode: inputPlan.mode,
+    inputCount: inputPlan.input.length,
+    reason: inputPlan.reason,
+    ...(inputPlan.previousResponseId
+      ? { previousResponseId: inputPlan.previousResponseId }
+      : {}),
+    request: {
+      ...requestBase,
+      input: inputPlan.input,
+      ...(inputPlan.previousResponseId
+        ? { previous_response_id: inputPlan.previousResponseId }
+        : {}),
+    },
+  }
+
+  const fallbackReplay =
+    inputPlan.mode === 'native'
+      ? {
+          mode: 'replay' as const,
+          inputCount: inputPlan.replayInput.length,
+          reason: 'native_chain_downgrade',
+          request: {
+            ...requestBase,
+            input: inputPlan.replayInput,
+          },
+        }
+      : undefined
 
   logForDebugging(
     `[openaiResponses] request ${jsonStringify({
       url: buildResponsesUrl(),
       model,
-      inputCount: input.length,
+      mode: primary.mode,
+      inputCount: primary.inputCount,
+      hasPreviousResponseId: Boolean(primary.previousResponseId),
+      continuityReason: primary.reason,
+      fullReplayInputCount: inputPlan.replayInput.length,
       toolCount: serializedTools.length,
       instructionChars: params.systemPrompt.join('\n').length,
       promptCacheRetention,
+      store: storeResponses,
       hasReasoning: effort !== undefined,
       hasMaxOutputTokensOverride:
         params.options.maxOutputTokensOverride !== undefined,
@@ -660,8 +809,9 @@ async function createResponsesRequest(params: StreamTurnParams): Promise<{
 
   return {
     url: buildResponsesUrl(),
-    request,
     model,
+    primary,
+    fallbackReplay,
   }
 }
 
@@ -888,6 +1038,35 @@ function formatOpenAIResponsesError(
   }
 }
 
+function getOpenAIResponsesNativeDowngradeReason(
+  error: unknown,
+): string | undefined {
+  if (!(error instanceof OpenAIHTTPError)) {
+    return undefined
+  }
+
+  if (
+    error.status !== 400 &&
+    error.status !== 404 &&
+    error.status !== 409 &&
+    error.status !== 422
+  ) {
+    return undefined
+  }
+
+  const normalized = error.message.toLowerCase()
+  const mentionsPreviousResponse =
+    normalized.includes('previous_response_id') ||
+    normalized.includes('previous response') ||
+    normalized.includes('stored response') ||
+    normalized.includes('conversation state') ||
+    normalized.includes('store=true') ||
+    normalized.includes('must be stored') ||
+    (normalized.includes('response') && normalized.includes('not found'))
+
+  return mentionsPreviousResponse ? error.message : undefined
+}
+
 const OPENAI_RESPONSES_TRUNCATED_STREAM_ERROR =
   'OpenAI Responses stream disconnected mid-event'
 
@@ -992,9 +1171,12 @@ async function streamResponse(
 export async function* runOpenAIResponses(
   params: StreamTurnParams,
 ): ModelBackendStream {
-  const { url, request, model } = await createResponsesRequest(params)
+  const { url, primary, fallbackReplay, model } =
+    await createResponsesRequest(params)
+  let activeRequest = primary
+  let attemptIndex = 0
 
-  for (let attemptIndex = 0; ; attemptIndex++) {
+  for (;;) {
     let emittedVisibleOutput = false
     const emit = <T>(value: T): T => {
       emittedVisibleOutput = true
@@ -1002,7 +1184,11 @@ export async function* runOpenAIResponses(
     }
 
     try {
-      const streamedResponse = await streamResponse(url, request, params.signal)
+      const streamedResponse = await streamResponse(
+        url,
+        activeRequest.request,
+        params.signal,
+      )
       const outputIndexes = new Map<string, number>()
       const outputItemTypes = new Map<number, string>()
       const streamedNativeItems = new Map<
@@ -1527,6 +1713,19 @@ export async function* runOpenAIResponses(
       }
       return
     } catch (error) {
+      const nativeDowngradeReason =
+        activeRequest.mode === 'native' && !emittedVisibleOutput
+          ? getOpenAIResponsesNativeDowngradeReason(error)
+          : undefined
+      if (nativeDowngradeReason && fallbackReplay) {
+        logForDebugging(
+          `[openaiResponses] previous_response_id downgraded to stateless replay: ${nativeDowngradeReason}`,
+        )
+        activeRequest = fallbackReplay
+        attemptIndex = 0
+        continue
+      }
+
       if (
         shouldRetryOpenAIResponsesRequest(
           error,
@@ -1547,6 +1746,7 @@ export async function* runOpenAIResponses(
             return
           }
         }
+        attemptIndex += 1
         continue
       }
 

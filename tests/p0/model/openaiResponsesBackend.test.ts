@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const fetchOpenAIResponseMock = vi.hoisted(() => vi.fn())
 const resolveAppliedEffortMock = vi.hoisted(() => vi.fn(() => undefined))
+const shouldStoreOpenAIResponsesMock = vi.hoisted(() => vi.fn(() => true))
 const OpenAIHTTPErrorMock = vi.hoisted(
   () =>
     class OpenAIHTTPError extends Error {
@@ -101,7 +102,7 @@ vi.mock('../../../src/Tool.js', () => ({
 vi.mock('../../../src/services/modelBackend/openaiCodexConfig.js', () => ({
   resolveOpenAIModel: () => 'gpt-5.2',
   resolveOpenAIPromptCacheRetention: () => '24h',
-  shouldStoreOpenAIResponses: () => true,
+  shouldStoreOpenAIResponses: () => shouldStoreOpenAIResponsesMock(),
 }))
 vi.mock('../../../src/services/modelBackend/openaiApi.js', () => ({
   fetchOpenAIResponse: (...args: unknown[]) => fetchOpenAIResponseMock(...args),
@@ -146,6 +147,8 @@ beforeEach(() => {
   fetchOpenAIResponseMock.mockReset()
   resolveAppliedEffortMock.mockReset()
   resolveAppliedEffortMock.mockReturnValue(undefined)
+  shouldStoreOpenAIResponsesMock.mockReset()
+  shouldStoreOpenAIResponsesMock.mockReturnValue(true)
 })
 
 describe('openaiResponsesBackend fork contracts', () => {
@@ -775,6 +778,316 @@ describe('openaiResponsesBackend fork contracts', () => {
         arguments: '{"file":"b.ts"}',
       },
     ])
+  })
+
+  it('[P0:model] uses previous_response_id native chaining and sends only the post-anchor delta when stored Responses continuity is available', async () => {
+    fetchOpenAIResponseMock.mockResolvedValue(
+      makeSseResponse([
+        { type: 'response.created' },
+        {
+          type: 'response.completed',
+          response: {
+            id: 'resp-native-chain-1',
+            output: [
+              {
+                type: 'message',
+                content: [{ type: 'output_text', text: 'continued natively' }],
+              },
+            ],
+            usage: {
+              input_tokens: 2,
+              output_tokens: 1,
+            },
+          },
+        },
+      ]),
+    )
+
+    await collect(
+      runOpenAIResponses({
+        messages: [
+          {
+            type: 'assistant',
+            requestId: 'resp-anchor-1',
+            message: { content: 'prior stored answer' },
+          },
+          {
+            type: 'user',
+            message: { content: 'follow-up question' },
+          },
+        ],
+        systemPrompt: ['system'],
+        tools: [],
+        options: { model: 'sonnet' },
+        signal: new AbortController().signal,
+      } as any),
+    )
+
+    const [, options] = fetchOpenAIResponseMock.mock.calls.at(-1)!
+    expect(options.body.previous_response_id).toBe('resp-anchor-1')
+    expect(options.body.input).toEqual([
+      {
+        role: 'user',
+        content: [{ type: 'input_text', text: 'follow-up question' }],
+      },
+    ])
+  })
+
+  it('[P0:model] falls back to full replay when no stored assistant response exists after the latest continuity boundary', async () => {
+    fetchOpenAIResponseMock.mockResolvedValue(
+      makeSseResponse([
+        { type: 'response.created' },
+        {
+          type: 'response.completed',
+          response: {
+            id: 'resp-post-boundary-replay-1',
+            output: [
+              {
+                type: 'message',
+                content: [{ type: 'output_text', text: 'replayed after boundary' }],
+              },
+            ],
+            usage: {
+              input_tokens: 3,
+              output_tokens: 1,
+            },
+          },
+        },
+      ]),
+    )
+
+    await collect(
+      runOpenAIResponses({
+        messages: [
+          {
+            type: 'system',
+            subtype: 'compact_boundary',
+            content: 'Conversation compacted',
+          },
+          {
+            type: 'user',
+            message: { content: 'compact summary' },
+          },
+          {
+            type: 'user',
+            message: { content: 'new request after compact' },
+          },
+        ],
+        systemPrompt: ['system'],
+        tools: [],
+        options: { model: 'sonnet' },
+        signal: new AbortController().signal,
+      } as any),
+    )
+
+    const [, options] = fetchOpenAIResponseMock.mock.calls.at(-1)!
+    expect(options.body).not.toHaveProperty('previous_response_id')
+    expect(options.body.input).toEqual([
+      {
+        role: 'user',
+        content: [{ type: 'input_text', text: 'compact summary' }],
+      },
+      {
+        role: 'user',
+        content: [{ type: 'input_text', text: 'new request after compact' }],
+      },
+    ])
+  })
+
+  it('[P0:model] re-enables previous_response_id chaining once a new stored response exists after the latest continuity boundary', async () => {
+    fetchOpenAIResponseMock.mockResolvedValue(
+      makeSseResponse([
+        { type: 'response.created' },
+        {
+          type: 'response.completed',
+          response: {
+            id: 'resp-post-boundary-chain-1',
+            output: [
+              {
+                type: 'message',
+                content: [{ type: 'output_text', text: 'post-boundary chain ok' }],
+              },
+            ],
+            usage: {
+              input_tokens: 2,
+              output_tokens: 1,
+            },
+          },
+        },
+      ]),
+    )
+
+    await collect(
+      runOpenAIResponses({
+        messages: [
+          {
+            type: 'system',
+            subtype: 'microcompact_boundary',
+            content: 'Context microcompacted',
+          },
+          {
+            type: 'assistant',
+            requestId: 'resp-post-boundary-anchor-1',
+            message: { content: 'answer after boundary reset' },
+          },
+          {
+            type: 'user',
+            message: { content: 'next follow-up' },
+          },
+        ],
+        systemPrompt: ['system'],
+        tools: [],
+        options: { model: 'sonnet' },
+        signal: new AbortController().signal,
+      } as any),
+    )
+
+    const [, options] = fetchOpenAIResponseMock.mock.calls.at(-1)!
+    expect(options.body.previous_response_id).toBe(
+      'resp-post-boundary-anchor-1',
+    )
+    expect(options.body.input).toEqual([
+      {
+        role: 'user',
+        content: [{ type: 'input_text', text: 'next follow-up' }],
+      },
+    ])
+  })
+
+  it('[P0:model] stays on stateless replay when response storage is disabled even if a prior response id is present', async () => {
+    shouldStoreOpenAIResponsesMock.mockReturnValue(false)
+    fetchOpenAIResponseMock.mockResolvedValue(
+      makeSseResponse([
+        { type: 'response.created' },
+        {
+          type: 'response.completed',
+          response: {
+            id: 'resp-storage-disabled-1',
+            output: [
+              {
+                type: 'message',
+                content: [{ type: 'output_text', text: 'storage disabled replay' }],
+              },
+            ],
+            usage: {
+              input_tokens: 2,
+              output_tokens: 1,
+            },
+          },
+        },
+      ]),
+    )
+
+    await collect(
+      runOpenAIResponses({
+        messages: [
+          {
+            type: 'assistant',
+            requestId: 'resp-storage-disabled-anchor-1',
+            message: { content: 'stored answer that cannot be chained' },
+          },
+          {
+            type: 'user',
+            message: { content: 'follow-up despite disabled storage' },
+          },
+        ],
+        systemPrompt: ['system'],
+        tools: [],
+        options: { model: 'sonnet' },
+        signal: new AbortController().signal,
+      } as any),
+    )
+
+    const [, options] = fetchOpenAIResponseMock.mock.calls.at(-1)!
+    expect(options.body.store).toBe(false)
+    expect(options.body).not.toHaveProperty('previous_response_id')
+    expect(options.body.input).toEqual([
+      {
+        role: 'assistant',
+        content: [{ type: 'output_text', text: 'stored answer that cannot be chained' }],
+      },
+      {
+        role: 'user',
+        content: [{ type: 'input_text', text: 'follow-up despite disabled storage' }],
+      },
+    ])
+  })
+
+  it('[P0:model] automatically downgrades a broken previous_response_id request to stateless replay', async () => {
+    fetchOpenAIResponseMock
+      .mockRejectedValueOnce(
+        new OpenAIHTTPErrorMock({
+          status: 400,
+          bodyText: 'previous_response_id could not be found',
+        }),
+      )
+      .mockResolvedValueOnce(
+        makeSseResponse([
+          { type: 'response.created', response: { id: 'resp-native-downgrade-1' } },
+          {
+            type: 'response.completed',
+            response: {
+              id: 'resp-native-downgrade-1',
+              output: [
+                {
+                  type: 'message',
+                  role: 'assistant',
+                  content: [{ type: 'output_text', text: 'recovered via replay' }],
+                },
+              ],
+              usage: {
+                input_tokens: 3,
+                output_tokens: 1,
+              },
+            },
+          },
+        ]),
+      )
+
+    const outputs = await collect(
+      runOpenAIResponses({
+        messages: [
+          {
+            type: 'assistant',
+            requestId: 'resp-missing-anchor-1',
+            message: { content: 'prior answer before downgrade' },
+          },
+          {
+            type: 'user',
+            message: { content: 'follow-up after missing chain anchor' },
+          },
+        ],
+        systemPrompt: ['system'],
+        tools: [],
+        options: { model: 'sonnet' },
+        signal: new AbortController().signal,
+      } as any),
+    )
+
+    expect(fetchOpenAIResponseMock).toHaveBeenCalledTimes(2)
+    expect(fetchOpenAIResponseMock.mock.calls[0]![1].body.previous_response_id).toBe(
+      'resp-missing-anchor-1',
+    )
+    expect(
+      fetchOpenAIResponseMock.mock.calls[1]![1].body.previous_response_id,
+    ).toBeUndefined()
+    expect(fetchOpenAIResponseMock.mock.calls[1]![1].body.input).toEqual([
+      {
+        role: 'assistant',
+        content: [{ type: 'output_text', text: 'prior answer before downgrade' }],
+      },
+      {
+        role: 'user',
+        content: [{ type: 'input_text', text: 'follow-up after missing chain anchor' }],
+      },
+    ])
+    expect(outputs.at(-1)).toMatchObject({
+      type: 'assistant',
+      requestId: 'resp-native-downgrade-1',
+      message: {
+        content: [{ type: 'text', text: 'recovered via replay' }],
+      },
+    })
   })
 
   it('[P0:model] falls back to zodToJsonSchema when a tool omits inputJSONSchema in the Responses request payload', async () => {

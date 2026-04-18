@@ -212,10 +212,18 @@ export type PendingCacheEdits = {
   baselineCacheDeletedTokens: number
 }
 
+export type ContinuityBoundaryInfo = {
+  trigger: 'auto'
+  tokensSaved: number
+  compactedToolIds: string[]
+  clearedAttachmentUUIDs: string[]
+}
+
 export type MicrocompactResult = {
   messages: Message[]
   compactionInfo?: {
     pendingCacheEdits?: PendingCacheEdits
+    continuityBoundary?: ContinuityBoundaryInfo
   }
 }
 
@@ -385,6 +393,12 @@ async function cachedMicrocompactPath(
     return {
       messages,
       compactionInfo: {
+        continuityBoundary: {
+          trigger: 'auto',
+          tokensSaved: 0,
+          compactedToolIds: toolsToDelete,
+          clearedAttachmentUUIDs: [],
+        },
         pendingCacheEdits: {
           trigger: 'auto',
           deletedToolIds: toolsToDelete,
@@ -526,5 +540,15 @@ function maybeTimeBasedMicrocompact(
     notifyCacheDeletion(querySource)
   }
 
-  return { messages: result }
+  return {
+    messages: result,
+    compactionInfo: {
+      continuityBoundary: {
+        trigger: 'auto',
+        tokensSaved,
+        compactedToolIds: [...clearSet],
+        clearedAttachmentUUIDs: [],
+      },
+    },
+  }
 }

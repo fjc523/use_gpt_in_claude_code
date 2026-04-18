@@ -926,13 +926,24 @@ export async function applyToolResultBudget(
   state: ContentReplacementState | undefined,
   writeToTranscript?: (records: ToolResultReplacementRecord[]) => void,
   skipToolNames?: ReadonlySet<string>,
-): Promise<Message[]> {
-  if (!state) return messages
+): Promise<{
+  messages: Message[]
+  invalidatedNativeContinuation: boolean
+}> {
+  if (!state) {
+    return {
+      messages,
+      invalidatedNativeContinuation: false,
+    }
+  }
   const result = await enforceToolResultBudget(messages, state, skipToolNames)
   if (result.newlyReplaced.length > 0) {
     writeToTranscript?.(result.newlyReplaced)
   }
-  return result.messages
+  return {
+    messages: result.messages,
+    invalidatedNativeContinuation: result.newlyReplaced.length > 0,
+  }
 }
 
 /**
