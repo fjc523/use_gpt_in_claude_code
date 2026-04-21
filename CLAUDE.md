@@ -8,6 +8,7 @@ This file provides guidance to Claude Code when working with code in this reposi
 - Docs-only changes do not require a rebuild.
 - This fork is meant to run from source. Do not rely on official Anthropic install/update flows in this repo.
 - All release, npm publish, tag, and GitHub Release work must follow `docs/release-version-policy.md`.
+- If the user says `走发版流程吧 <version>` (for example `走发版流程吧 2.4.1`), treat it as authorization to complete the full release flow end-to-end without pausing for intermediate confirmation: update release files as needed, run required validation/build steps, commit, push `main`, create/push the matching annotated tag, and continue tracking the release workflow unless the user explicitly says otherwise.
 - Future releases should include a one-line summary in the tag message (for example: `telegram 支持关闭`); the release workflow prepends it to the GitHub Release body.
 - Treat `package.json.version` as the only authoritative release version; do not introduce or preserve a second formal version source in scripts, CI, or release notes.
 - Opus prompt mode is the default runtime behavior. `/opus` can toggle it off or back on mid-session; `--opus` explicitly starts with it enabled.
