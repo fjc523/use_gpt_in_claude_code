@@ -1,5 +1,6 @@
 import type { ChildProcess, ExecFileException } from 'child_process'
 import { execFile, spawn } from 'child_process'
+import { chmod, stat } from 'fs/promises'
 import memoize from 'lodash-es/memoize.js'
 import { homedir } from 'os'
 import * as path from 'path'
@@ -26,6 +27,42 @@ type RipgrepConfig = {
   command: string
   args: string[]
   argv0?: string
+}
+
+function hasUnixExecuteBit(mode: number): boolean {
+  return (mode & 0o111) !== 0
+}
+
+let builtinRipgrepExecutableRepairPromise: Promise<void> | null = null
+
+async function ensureBuiltinRipgrepExecutableIfNecessary(): Promise<void> {
+  if (builtinRipgrepExecutableRepairPromise) {
+    return builtinRipgrepExecutableRepairPromise
+  }
+
+  builtinRipgrepExecutableRepairPromise = (async () => {
+    const config = getRipgrepConfig()
+    if (config.mode !== 'builtin' || process.platform === 'win32') {
+      return
+    }
+
+    try {
+      const currentStat = await stat(config.command)
+      if (hasUnixExecuteBit(currentStat.mode)) {
+        return
+      }
+
+      await chmod(config.command, 0o755)
+      logForDebugging(
+        `Repaired missing execute bit on vendored ripgrep binary: ${config.command}`,
+      )
+    } catch (error) {
+      builtinRipgrepExecutableRepairPromise = null
+      logError(error)
+    }
+  })()
+
+  return builtinRipgrepExecutableRepairPromise
 }
 
 const getRipgrepConfig = memoize((): RipgrepConfig => {
@@ -115,14 +152,17 @@ function ripGrepRaw(
     stderr: string,
   ) => void,
   singleThread = false,
+  preparedConfig?: {
+    rgPath: string
+    rgArgs: string[]
+    argv0?: string
+  },
 ): ChildProcess {
   // NB: When running interactively, ripgrep does not require a path as its last
   // argument, but when run non-interactively, it will hang unless a path or file
   // pattern is provided
 
-  const { rgPath, rgArgs, argv0 } = ripgrepCommand()
-
-  // Use single-threaded mode only if explicitly requested for this call's retry
+  const { rgPath, rgArgs, argv0 } = preparedConfig ?? ripgrepCommand()
   const threadArgs = singleThread ? ['-j', '1'] : []
   const fullArgs = [...rgArgs, ...threadArgs, ...args, target]
   // Allow timeout to be configured via env var (in seconds), otherwise use platform defaults
@@ -231,6 +271,15 @@ function ripGrepRaw(
   )
 }
 
+async function ensurePreparedRipgrepCommand(): Promise<{
+  rgPath: string
+  rgArgs: string[]
+  argv0?: string
+}> {
+  await codesignRipgrepIfNecessary()
+  return ripgrepCommand()
+}
+
 /**
  * Stream-count lines from `rg --files` without buffering stdout.
  *
@@ -248,8 +297,8 @@ async function ripGrepFileCount(
   target: string,
   abortSignal: AbortSignal,
 ): Promise<number> {
-  await codesignRipgrepIfNecessary()
-  const { rgPath, rgArgs, argv0 } = ripgrepCommand()
+  const prepared = await ensurePreparedRipgrepCommand()
+  const { rgPath, rgArgs, argv0 } = prepared
 
   return new Promise<number>((resolve, reject) => {
     const child = spawn(rgPath, [...rgArgs, ...args, target], {
@@ -298,8 +347,8 @@ export async function ripGrepStream(
   abortSignal: AbortSignal,
   onLines: (lines: string[]) => void,
 ): Promise<void> {
-  await codesignRipgrepIfNecessary()
-  const { rgPath, rgArgs, argv0 } = ripgrepCommand()
+  const prepared = await ensurePreparedRipgrepCommand()
+  const { rgPath, rgArgs, argv0 } = prepared
 
   return new Promise<void>((resolve, reject) => {
     const child = spawn(rgPath, [...rgArgs, ...args, target], {
@@ -347,7 +396,7 @@ export async function ripGrep(
   target: string,
   abortSignal: AbortSignal,
 ): Promise<string[]> {
-  await codesignRipgrepIfNecessary()
+  const prepared = await ensurePreparedRipgrepCommand()
 
   // Test ripgrep on first use and cache the result (fire and forget)
   void testRipgrepOnFirstUse().catch(error => {
@@ -404,6 +453,7 @@ export async function ripGrep(
             handleResult(retryError, retryStdout, retryStderr, true)
           },
           true, // Force single-threaded mode for this retry only
+          prepared,
         )
         return
       }
@@ -456,9 +506,16 @@ export async function ripGrep(
       resolve(lines)
     }
 
-    ripGrepRaw(args, target, abortSignal, (error, stdout, stderr) => {
-      handleResult(error, stdout, stderr, false)
-    })
+    ripGrepRaw(
+      args,
+      target,
+      abortSignal,
+      (error, stdout, stderr) => {
+        handleResult(error, stdout, stderr, false)
+      },
+      false,
+      prepared,
+    )
   })
 }
 
@@ -554,6 +611,8 @@ const testRipgrepOnFirstUse = memoize(async (): Promise<void> => {
     return
   }
 
+  await ensureBuiltinRipgrepExecutableIfNecessary()
+
   const config = getRipgrepConfig()
 
   try {
@@ -616,8 +675,16 @@ const testRipgrepOnFirstUse = memoize(async (): Promise<void> => {
   }
 })
 
+export function __resetRipgrepTestState(): void {
+  ripgrepStatus = null
+  alreadyDoneSignCheck = false
+  builtinRipgrepExecutableRepairPromise = null
+}
+
 let alreadyDoneSignCheck = false
 async function codesignRipgrepIfNecessary() {
+  await ensureBuiltinRipgrepExecutableIfNecessary()
+
   if (process.platform !== 'darwin' || alreadyDoneSignCheck) {
     return
   }
