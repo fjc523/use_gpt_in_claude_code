@@ -1,4 +1,4 @@
-import { existsSync, readFileSync } from 'fs'
+import { chmodSync, existsSync, readFileSync, writeFileSync } from 'fs'
 import { homedir } from 'os'
 import { join } from 'path'
 import { normalizeOpenAICompatibleModel } from './openaiModelCatalog.js'
@@ -10,6 +10,7 @@ type CodexProviderConfig = {
   model: string
   disableResponseStorage: boolean
   baseUrl: string
+  baseUrlExplicit: boolean
   wireApi: string
   envKey: string
   requiresOpenAIAuth: boolean
@@ -27,6 +28,20 @@ type CodexAuthMode = 'apikey' | 'chatgpt' | 'chatgptAuthTokens'
 type CodexAuthConfig = {
   authMode?: CodexAuthMode
   openaiApiKey?: string
+  chatgptAccessToken?: string
+  chatgptRefreshToken?: string
+  chatgptAccountId?: string
+  lastRefresh?: string
+}
+
+export type OpenAIAuthMode = 'api_key' | 'chatgpt'
+
+export type OpenAIAuthConfig = {
+  mode: OpenAIAuthMode
+  bearerToken: string
+  source: string
+  accountId?: string
+  refreshable: boolean
 }
 
 export type OpenAIReasoningEffort =
@@ -42,7 +57,11 @@ let cachedAuthConfig: CodexAuthConfig | null | undefined
 
 const DEFAULT_MODEL = 'gpt-5.4'
 const DEFAULT_BASE_URL = 'https://api.openai.com/v1'
+const DEFAULT_CHATGPT_BASE_URL = 'https://chatgpt.com/backend-api/codex'
 const DEFAULT_ENV_KEY = 'OPENAI_API_KEY'
+const CHATGPT_REFRESH_TOKEN_URL = 'https://auth.openai.com/oauth/token'
+const CHATGPT_REFRESH_TOKEN_URL_ENV = 'CODEX_REFRESH_TOKEN_URL_OVERRIDE'
+const CODEX_CHATGPT_CLIENT_ID = 'app_EMoamEEZ73f0CkXaXp7hrann'
 
 function getCodexConfigPath(): string {
   return join(homedir(), '.codex', 'config.toml')
@@ -60,6 +79,16 @@ function readIfExists(path: string): string | null {
   }
 }
 
+function writeCodexAuthJson(value: Record<string, unknown>): void {
+  const path = getCodexAuthPath()
+  writeFileSync(path, `${JSON.stringify(value, null, 2)}\n`, { mode: 0o600 })
+  try {
+    chmodSync(path, 0o600)
+  } catch {
+    // Best effort; writeFileSync mode covers newly-created files.
+  }
+}
+
 function escapeRegex(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 }
@@ -67,6 +96,23 @@ function escapeRegex(value: string): string {
 function trimToUndefined(value: string | undefined): string | undefined {
   const trimmed = value?.trim()
   return trimmed ? trimmed : undefined
+}
+
+function getRecordString(
+  record: Record<string, unknown>,
+  key: string,
+): string | undefined {
+  const value = record[key]
+  return typeof value === 'string' ? trimToUndefined(value) : undefined
+}
+
+function getAuthJsonTokens(
+  parsed: Record<string, unknown>,
+): Record<string, unknown> {
+  const tokens = parsed.tokens
+  return tokens && typeof tokens === 'object' && !Array.isArray(tokens)
+    ? (tokens as Record<string, unknown>)
+    : {}
 }
 
 function matchString(source: string, pattern: RegExp): string | undefined {
@@ -241,6 +287,7 @@ export function loadCodexProviderConfig(): CodexProviderConfig {
       model: DEFAULT_MODEL,
       disableResponseStorage: true,
       baseUrl: DEFAULT_BASE_URL,
+      baseUrlExplicit: false,
       wireApi: 'responses',
       envKey: DEFAULT_ENV_KEY,
       requiresOpenAIAuth: false,
@@ -278,10 +325,13 @@ export function loadCodexProviderConfig(): CodexProviderConfig {
         matchString(raw, /^openai_base_url\s*=\s*"([^"]+)"/m)
       : undefined
 
+  const providerBaseUrl = matchString(
+    providerSection,
+    /^\s*base_url\s*=\s*"([^"]+)"/m,
+  )
   const baseUrl =
-    matchString(providerSection, /^\s*base_url\s*=\s*"([^"]+)"/m) ||
-    openaiBaseUrl ||
-    DEFAULT_BASE_URL
+    providerBaseUrl || openaiBaseUrl || DEFAULT_BASE_URL
+  const baseUrlExplicit = Boolean(providerBaseUrl || openaiBaseUrl)
   const wireApi =
     matchString(providerSection, /^\s*wire_api\s*=\s*"([^"]+)"/m) ||
     'responses'
@@ -332,6 +382,7 @@ export function loadCodexProviderConfig(): CodexProviderConfig {
     model: normalizeOpenAICompatibleModel(topLevelModel) ?? topLevelModel,
     disableResponseStorage,
     baseUrl: normalizeBaseUrl(baseUrl),
+    baseUrlExplicit,
     wireApi,
     requiresOpenAIAuth,
     promptCacheRetention,
@@ -369,18 +420,27 @@ export function loadCodexAuthConfig(): CodexAuthConfig {
     const authMode = normalizeAuthMode(
       typeof parsed.auth_mode === 'string' ? parsed.auth_mode : undefined,
     )
-    const openaiApiKey =
+    const isChatGPTAuth =
       authMode === 'chatgpt' || authMode === 'chatgptAuthTokens'
-        ? undefined
-        : getConfiguredAuthJsonKeyNames()
-            .map(key => {
-              const value = parsed[key]
-              return typeof value === 'string' ? value.trim() : undefined
-            })
-            .find(value => Boolean(value))
+    const tokens = getAuthJsonTokens(parsed)
+    const openaiApiKey = isChatGPTAuth
+      ? undefined
+      : getConfiguredAuthJsonKeyNames()
+          .map(key => getRecordString(parsed, key))
+          .find(value => Boolean(value))
     cachedAuthConfig = {
       authMode,
       openaiApiKey,
+      chatgptAccessToken: isChatGPTAuth
+        ? getRecordString(tokens, 'access_token')
+        : undefined,
+      chatgptRefreshToken: isChatGPTAuth
+        ? getRecordString(tokens, 'refresh_token')
+        : undefined,
+      chatgptAccountId: isChatGPTAuth
+        ? getRecordString(tokens, 'account_id')
+        : undefined,
+      lastRefresh: getRecordString(parsed, 'last_refresh'),
     }
     return cachedAuthConfig
   } catch {
@@ -389,18 +449,57 @@ export function loadCodexAuthConfig(): CodexAuthConfig {
   }
 }
 
-export function getOpenAIApiKey(): string | undefined {
+export function getOpenAIAuthConfig(): OpenAIAuthConfig | undefined {
   for (const envName of getConfiguredApiKeyEnvNames()) {
     const envKey = process.env[envName]?.trim()
-    if (envKey) return envKey
+    if (envKey) {
+      return {
+        mode: 'api_key',
+        bearerToken: envKey,
+        source: envName,
+        refreshable: false,
+      }
+    }
   }
 
   const providerConfig = loadCodexProviderConfig()
   if (providerConfig.experimentalBearerToken?.trim()) {
-    return providerConfig.experimentalBearerToken.trim()
+    return {
+      mode: 'api_key',
+      bearerToken: providerConfig.experimentalBearerToken.trim(),
+      source: 'experimental_bearer_token',
+      refreshable: false,
+    }
   }
 
-  return loadCodexAuthConfig().openaiApiKey
+  const auth = loadCodexAuthConfig()
+  if (auth.openaiApiKey) {
+    return {
+      mode: 'api_key',
+      bearerToken: auth.openaiApiKey,
+      source: '~/.codex/auth.json',
+      refreshable: false,
+    }
+  }
+  if (auth.chatgptAccessToken) {
+    return {
+      mode: 'chatgpt',
+      bearerToken: auth.chatgptAccessToken,
+      source: '~/.codex/auth.json',
+      accountId: auth.chatgptAccountId,
+      refreshable: Boolean(auth.chatgptRefreshToken),
+    }
+  }
+
+  return undefined
+}
+
+export function getOpenAIApiKey(): string | undefined {
+  return getOpenAIAuthConfig()?.bearerToken
+}
+
+export function resolveOpenAIAuthMode(): OpenAIAuthMode | undefined {
+  return getOpenAIAuthConfig()?.mode
 }
 
 export function resolveOpenAIApiKeyEnvKey(): string {
@@ -417,9 +516,81 @@ export function getMissingOpenAIApiKeyMessage(): string {
 }
 
 export function resolveOpenAIBaseUrl(): string {
-  return normalizeBaseUrl(
-    process.env.OPENAI_BASE_URL || loadCodexProviderConfig().baseUrl,
+  const provider = loadCodexProviderConfig()
+  const envBaseUrl = process.env.OPENAI_BASE_URL
+  if (
+    !envBaseUrl &&
+    !provider.baseUrlExplicit &&
+    resolveOpenAIAuthMode() === 'chatgpt'
+  ) {
+    return DEFAULT_CHATGPT_BASE_URL
+  }
+  return normalizeBaseUrl(envBaseUrl || provider.baseUrl)
+}
+
+export async function refreshOpenAIChatGPTAuthToken(): Promise<
+  OpenAIAuthConfig | undefined
+> {
+  const auth = loadCodexAuthConfig()
+  if (!auth.chatgptRefreshToken) {
+    return undefined
+  }
+
+  const response = await fetch(
+    process.env[CHATGPT_REFRESH_TOKEN_URL_ENV] || CHATGPT_REFRESH_TOKEN_URL,
+    {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        client_id: CODEX_CHATGPT_CLIENT_ID,
+        grant_type: 'refresh_token',
+        refresh_token: auth.chatgptRefreshToken,
+      }),
+    },
   )
+
+  const payloadText = await response.text()
+  if (!response.ok) {
+    throw new Error(
+      payloadText ||
+        `ChatGPT auth token refresh failed with status ${response.status}`,
+    )
+  }
+
+  let payload: {
+    id_token?: string
+    access_token?: string
+    refresh_token?: string
+  }
+  try {
+    payload = JSON.parse(payloadText) as typeof payload
+  } catch {
+    throw new Error('ChatGPT auth token refresh returned invalid JSON')
+  }
+
+  const accessToken = payload.access_token?.trim()
+  if (!accessToken) {
+    throw new Error('ChatGPT auth token refresh did not return access_token')
+  }
+
+  const raw = readIfExists(getCodexAuthPath())
+  const parsed = raw ? (JSON.parse(raw) as Record<string, unknown>) : {}
+  const existingTokens = getAuthJsonTokens(parsed)
+  parsed.auth_mode =
+    normalizeAuthMode(
+      typeof parsed.auth_mode === 'string' ? parsed.auth_mode : undefined,
+    ) ?? 'chatgpt'
+  parsed.tokens = {
+    ...existingTokens,
+    id_token: payload.id_token?.trim() || existingTokens.id_token,
+    access_token: accessToken,
+    refresh_token: payload.refresh_token?.trim() || auth.chatgptRefreshToken,
+    account_id: auth.chatgptAccountId || existingTokens.account_id,
+  }
+  parsed.last_refresh = new Date().toISOString()
+  writeCodexAuthJson(parsed)
+  cachedAuthConfig = undefined
+  return getOpenAIAuthConfig()
 }
 
 export function resolveOpenAIProviderHeaders(): StringMap | undefined {

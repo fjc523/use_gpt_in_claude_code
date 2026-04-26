@@ -117,9 +117,9 @@ function OpenAILoginNotice({
           {BRAND_NAME} is using the OpenAI/Codex Responses backend.
         </Text>
         {hasKey ? <Text color="success">
-            Credentials are already configured. No browser login is required.
+            Credentials are already configured.
           </Text> : <Text color="warning">
-            No OpenAI/Codex API key is configured. Set <Text bold>{describeOpenAIApiKeySources()}</Text>.
+            No OpenAI/Codex credentials are configured. Set <Text bold>{describeOpenAIApiKeySources()}</Text> or sign in with Codex.
           </Text>}
         <Text dimColor>
           Press Esc to close. Use <Text bold>claude auth status</Text> for full credential details.

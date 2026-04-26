@@ -20,9 +20,20 @@ npm upgrade -g @zju_han/claudex-cli
 
 ### 环境
 
-确保codex可以正常调用模型，会自动读codex的配置启动使用gpt模型，不用额外配置。
+确保 Codex 可以正常调用模型。`claudex` 会自动读取 Codex 的模型配置和认证信息启动 GPT / Codex 模型。
 
-目前只测试了通过 cc-switch使用codex的配置，直接配置没测过，后续支持。
+当前支持两种 OpenAI / Codex 认证方式，并按优先级自动选择：
+
+1. 环境变量 API key：优先读取 `OPENAI_API_KEY`；如果 `~/.codex/config.toml` 的 provider 配置了 `env_key`，则先读该环境变量，再 fallback 到 `OPENAI_API_KEY`。
+2. Codex 本地认证文件：读取 `~/.codex/auth.json`。`auth_mode = "apikey"` 时使用文件内 API key；`auth_mode = "chatgpt"` 时复用 `codex login` 的 ChatGPT 登录态。
+
+ChatGPT 登录态会自动切到 Codex ChatGPT 后端，并在访问令牌过期后尝试用 refresh token 刷新一次。也就是说，已经通过 `codex login` 登录 ChatGPT 的机器通常不需要额外配置 `OPENAI_API_KEY`。
+
+可以用下面命令检查当前实际生效的认证方式：
+
+```bash
+claudex auth status --text
+```
 
 ### 启动
 

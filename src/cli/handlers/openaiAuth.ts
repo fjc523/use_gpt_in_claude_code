@@ -3,11 +3,10 @@
 import { BRAND_NAME } from '../../constants/brand.js'
 import {
   describeOpenAIApiKeySources,
+  getOpenAIAuthConfig,
   getOpenAIApiKey,
   getMissingOpenAIApiKeyMessage,
-  loadCodexAuthConfig,
   loadCodexProviderConfig,
-  resolveOpenAIApiKeyEnvKey,
   resolveOpenAIBaseUrl,
   resolveOpenAIModel,
   shouldStoreOpenAIResponses,
@@ -20,21 +19,7 @@ import { jsonStringify } from '../../utils/slowOperations.js'
 type ApiKeySource = string | 'none'
 
 function getApiKeySource(): ApiKeySource {
-  const configuredEnvKey = resolveOpenAIApiKeyEnvKey()
-  const configuredEnvValue = process.env[configuredEnvKey]?.trim()
-  if (configuredEnvValue) {
-    return configuredEnvKey
-  }
-  if (
-    configuredEnvKey !== 'OPENAI_API_KEY' &&
-    process.env.OPENAI_API_KEY?.trim()
-  ) {
-    return 'OPENAI_API_KEY'
-  }
-  if (loadCodexAuthConfig().openaiApiKey) {
-    return '~/.codex/auth.json'
-  }
-  return 'none'
+  return getOpenAIAuthConfig()?.source ?? 'none'
 }
 
 async function validateConfiguredKey(): Promise<{
@@ -104,7 +89,10 @@ function getStatusPayload() {
 
   return {
     loggedIn: apiKeySource !== 'none',
-    authMethod: apiKeySource === 'none' ? 'none' : 'openai_api_key',
+    authMethod:
+      apiKeySource === 'none'
+        ? 'none'
+        : (getOpenAIAuthConfig()?.mode ?? 'api_key'),
     apiProvider: 'openaiResponses',
     providerId: provider.providerId,
     baseUrl: resolveOpenAIBaseUrl(),
@@ -156,7 +144,7 @@ export async function authStatus(opts: {
     process.stdout.write(`Wire API: ${status.wireApi}\n`)
     process.stdout.write(`Store responses: ${status.storeResponses}\n`)
     process.stdout.write(
-        `API key: ${status.apiKeySource ?? 'not configured'}\n`,
+      `Credentials: ${status.apiKeySource ?? 'not configured'}\n`,
     )
     if (!status.loggedIn) {
       process.stdout.write(

@@ -14,6 +14,7 @@ const ENV_KEYS = [
   'CUBENCE_DISABLE_RESPONSE_STORAGE',
   'CUBENCE_MODEL_BACKEND',
   'CLAUDE_CODE_MODEL_BACKEND',
+  'CODEX_REFRESH_TOKEN_URL_OVERRIDE',
 ] as const
 const ORIGINAL_ENV = Object.fromEntries(
   ENV_KEYS.map(key => [key, process.env[key]]),
@@ -54,6 +55,7 @@ async function loadCodexConfigModule(options?: {
 
   vi.resetModules()
   vi.doMock('fs', () => ({
+    chmodSync: vi.fn(),
     existsSync: (path: string) => files.has(String(path)),
     readFileSync: (path: string) => {
       const value = files.get(String(path))
@@ -61,6 +63,9 @@ async function loadCodexConfigModule(options?: {
         throw new Error(`ENOENT: ${String(path)}`)
       }
       return value
+    },
+    writeFileSync: (path: string, value: string) => {
+      files.set(String(path), value)
     },
   }))
   vi.doMock('os', () => ({
@@ -338,16 +343,45 @@ describe('openaiCodexConfig fork contracts', () => {
     expect(fromOpenAIFallback.getOpenAIApiKey()).toBe('openai-fallback-key')
   })
 
-  it('[P0:model] only uses auth.json OPENAI_API_KEY for API-key auth mode and ignores ChatGPT login payloads', async () => {
+  it('[P0:model] supports both API-key auth and Codex ChatGPT auth.json payloads', async () => {
     const apiKeyMode = await loadCodexConfigModule({
       authJson: '{"auth_mode":"apikey","OPENAI_API_KEY":"api-key"}',
     })
     expect(apiKeyMode.getOpenAIApiKey()).toBe('api-key')
+    expect(apiKeyMode.getOpenAIAuthConfig()).toMatchObject({
+      mode: 'api_key',
+      bearerToken: 'api-key',
+      source: '~/.codex/auth.json',
+    })
 
     const chatgptMode = await loadCodexConfigModule({
-      authJson: '{"auth_mode":"chatgpt","OPENAI_API_KEY":"should-not-be-used","tokens":{"access_token":"token"}}',
+      authJson: '{"auth_mode":"chatgpt","OPENAI_API_KEY":"should-not-be-used","tokens":{"access_token":" access-token ","refresh_token":"refresh-token","account_id":"acct-123"}}',
     })
-    expect(chatgptMode.getOpenAIApiKey()).toBeUndefined()
+    expect(chatgptMode.getOpenAIApiKey()).toBe('access-token')
+    expect(chatgptMode.getOpenAIAuthConfig()).toMatchObject({
+      mode: 'chatgpt',
+      bearerToken: 'access-token',
+      source: '~/.codex/auth.json',
+      accountId: 'acct-123',
+      refreshable: true,
+    })
+    expect(chatgptMode.resolveOpenAIBaseUrl()).toBe(
+      'https://chatgpt.com/backend-api/codex',
+    )
+  })
+
+  it('[P0:model] keeps explicit provider and env base URLs ahead of ChatGPT auth defaults', async () => {
+    const providerBase = await loadCodexConfigModule({
+      configToml: '[model_providers.openai]\nbase_url = "https://proxy.example.com/v1"\n',
+      authJson: '{"auth_mode":"chatgpt","tokens":{"access_token":"token"}}',
+    })
+    expect(providerBase.resolveOpenAIBaseUrl()).toBe('https://proxy.example.com/v1')
+
+    const envBase = await loadCodexConfigModule({
+      authJson: '{"auth_mode":"chatgpt","tokens":{"access_token":"token"}}',
+      env: { OPENAI_BASE_URL: 'https://env.example.com/v1/responses/' },
+    })
+    expect(envBase.resolveOpenAIBaseUrl()).toBe('https://env.example.com/v1')
   })
 
   it('[P0:model] lets top-level prompt-cache retention, context window, and reasoning effort override provider-section values', async () => {

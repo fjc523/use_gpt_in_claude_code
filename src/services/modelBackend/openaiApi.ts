@@ -2,11 +2,13 @@ import { getIsNonInteractiveSession } from '../../bootstrap/state.js'
 import { jsonStringify } from '../../utils/slowOperations.js'
 import {
   getMissingOpenAIApiKeyMessage,
-  getOpenAIApiKey,
+  getOpenAIAuthConfig,
+  refreshOpenAIChatGPTAuthToken,
   resolveOpenAIBaseUrl,
   resolveOpenAIProviderHeaders,
   resolveOpenAIProviderQueryParams,
   shouldUseOpenAIOfficialClientHeaders,
+  type OpenAIAuthConfig,
 } from './openaiCodexConfig.js'
 import {
   buildOpenAICodexTurnMetadata,
@@ -125,6 +127,7 @@ export function buildOpenAIHeaders(
   apiKey: string,
   extraHeaders: HeadersInit | undefined,
   body: unknown,
+  authConfig?: OpenAIAuthConfig,
 ): Headers {
   const providerHeaders = resolveOpenAIProviderHeaders()
   const headers = new Headers(providerHeaders)
@@ -136,6 +139,9 @@ export function buildOpenAIHeaders(
   }
 
   headers.set('authorization', `Bearer ${apiKey}`)
+  if (authConfig?.mode === 'chatgpt' && authConfig.accountId) {
+    headers.set('chatgpt-account-id', authConfig.accountId)
+  }
   if (body !== undefined && !headers.has('content-type')) {
     headers.set('content-type', 'application/json')
   }
@@ -146,8 +152,9 @@ export async function buildOpenAIRequestHeaders(
   apiKey: string,
   extraHeaders: HeadersInit | undefined,
   body: unknown,
+  authConfig: OpenAIAuthConfig | undefined = getOpenAIAuthConfig(),
 ): Promise<Headers> {
-  const headers = buildOpenAIHeaders(apiKey, extraHeaders, body)
+  const headers = buildOpenAIHeaders(apiKey, extraHeaders, body, authConfig)
 
   if (!shouldUseOpenAIOfficialClientHeaders()) {
     return headers
@@ -190,23 +197,38 @@ export async function fetchOpenAIResponse(
     signal?: AbortSignal
   } = {},
 ): Promise<Response> {
-  const apiKey = getOpenAIApiKey()
-  if (!apiKey) {
+  const authConfig = getOpenAIAuthConfig()
+  if (!authConfig) {
     throw new Error(getMissingOpenAIApiKeyMessage())
   }
 
   const { method = 'GET', body, headers, signal } = options
-  const response = await fetch(resolveOpenAIRequestUrl(pathOrUrl), {
-    method,
-    headers: await buildOpenAIRequestHeaders(apiKey, headers, body),
-    body:
-      body === undefined
-        ? undefined
-        : typeof body === 'string'
-          ? body
-          : jsonStringify(body),
-    signal,
-  })
+  const requestBody =
+    body === undefined
+      ? undefined
+      : typeof body === 'string'
+        ? body
+        : jsonStringify(body)
+  const send = async (auth: OpenAIAuthConfig) =>
+    fetch(resolveOpenAIRequestUrl(pathOrUrl), {
+      method,
+      headers: await buildOpenAIRequestHeaders(
+        auth.bearerToken,
+        headers,
+        body,
+        auth,
+      ),
+      body: requestBody,
+      signal,
+    })
+
+  let response = await send(authConfig)
+  if (response.status === 401 && authConfig.mode === 'chatgpt') {
+    const refreshedAuth = await refreshOpenAIChatGPTAuthToken()
+    if (refreshedAuth) {
+      response = await send(refreshedAuth)
+    }
+  }
 
   if (!response.ok) {
     const payloadText = await response.text()

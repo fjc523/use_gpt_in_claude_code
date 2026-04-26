@@ -103,9 +103,9 @@ export function Onboarding({
       <Box flexDirection="column" width={70} gap={1}>
         <Text>This workspace is configured to use the OpenAI/Codex Responses backend.</Text>
         {getOpenAIApiKey() ? <Text color="success">
-            Credentials were detected. No browser login is required.
+            Credentials were detected.
           </Text> : <Text color="warning">
-            No OpenAI/Codex API key was detected. Set <Text bold>{describeOpenAIApiKeySources()}</Text> before sending prompts.
+            No OpenAI/Codex credentials were detected. Set <Text bold>{describeOpenAIApiKeySources()}</Text> or sign in with Codex before sending prompts.
           </Text>}
         <Text dimColor>
           Use <Text bold>/login</Text> or <Text bold>claude auth status</Text> to inspect the active credential source.

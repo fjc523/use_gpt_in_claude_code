@@ -2,6 +2,20 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 
 type LoadOptions = {
   apiKey?: string
+  authConfig?: {
+    mode: 'api_key' | 'chatgpt'
+    bearerToken: string
+    source: string
+    accountId?: string
+    refreshable: boolean
+  }
+  refreshedAuthConfig?: {
+    mode: 'api_key' | 'chatgpt'
+    bearerToken: string
+    source: string
+    accountId?: string
+    refreshable: boolean
+  }
   baseUrl?: string
   providerHeaders?: Record<string, string> | undefined
   providerQueryParams?: Record<string, string> | undefined
@@ -16,9 +30,20 @@ async function loadOpenAIApiModule(options: LoadOptions = {}) {
 
   vi.doMock('../../../src/services/modelBackend/openaiCodexConfig.js', () => ({
     describeOpenAIApiKeySources: () => 'OPENAI_API_KEY or ~/.codex/auth.json',
+    getOpenAIAuthConfig: () =>
+      options.authConfig ??
+      (options.apiKey
+        ? {
+            mode: 'api_key',
+            bearerToken: options.apiKey,
+            source: 'OPENAI_API_KEY',
+            refreshable: false,
+          }
+        : undefined),
     getOpenAIApiKey: () => options.apiKey,
     getMissingOpenAIApiKeyMessage: () =>
       'No OpenAI/Codex API key is configured. Expected OPENAI_API_KEY or ~/.codex/auth.json.',
+    refreshOpenAIChatGPTAuthToken: async () => options.refreshedAuthConfig,
     resolveOpenAIBaseUrl: () => options.baseUrl ?? 'https://api.example.com/v1',
     resolveOpenAIProviderHeaders: () => options.providerHeaders,
     resolveOpenAIProviderQueryParams: () => options.providerQueryParams,
@@ -112,6 +137,27 @@ describe('openaiApi fork contracts', () => {
     expect(officialHeaders.get('session_id')).toBe('sess-42')
     expect(officialHeaders.get('x-client-request-id')).toBe('sess-42')
     expect(officialHeaders.get('x-codex-turn-metadata')).toBe('signed-turn-meta')
+  })
+
+  it('[P0:model] sends ChatGPT account headers for ChatGPT auth mode', async () => {
+    const api = await loadOpenAIApiModule({
+      authConfig: {
+        mode: 'chatgpt',
+        bearerToken: 'chatgpt-access-token',
+        source: '~/.codex/auth.json',
+        accountId: 'acct-123',
+        refreshable: true,
+      },
+    })
+
+    const headers = await api.buildOpenAIRequestHeaders(
+      'chatgpt-access-token',
+      undefined,
+      { hello: 'world' },
+    )
+
+    expect(headers.get('authorization')).toBe('Bearer chatgpt-access-token')
+    expect(headers.get('chatgpt-account-id')).toBe('acct-123')
   })
 
   it('[P0:model] defaults raw string request bodies to application/json when the caller does not provide a content-type', async () => {
@@ -341,5 +387,40 @@ describe('openaiApi fork contracts', () => {
     await expect(emptyPayloadApi.fetchOpenAIJson('/responses')).rejects.toThrow(
       'OpenAI request returned an empty payload',
     )
+  })
+
+  it('[P0:model] refreshes ChatGPT auth once on 401 and retries with the new token', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(new Response('{"error":{"message":"expired"}}', { status: 401 }))
+      .mockResolvedValueOnce(new Response('{"ok":true}', { status: 200 }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    const api = await loadOpenAIApiModule({
+      baseUrl: 'https://chatgpt.com/backend-api/codex',
+      authConfig: {
+        mode: 'chatgpt',
+        bearerToken: 'expired-access-token',
+        source: '~/.codex/auth.json',
+        accountId: 'acct-123',
+        refreshable: true,
+      },
+      refreshedAuthConfig: {
+        mode: 'chatgpt',
+        bearerToken: 'fresh-access-token',
+        source: '~/.codex/auth.json',
+        accountId: 'acct-123',
+        refreshable: true,
+      },
+    })
+
+    await api.fetchOpenAIResponse('/responses', { method: 'POST', body: { ok: true } })
+
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+    const firstHeaders = fetchMock.mock.calls[0]![1]?.headers as Headers
+    const secondHeaders = fetchMock.mock.calls[1]![1]?.headers as Headers
+    expect(firstHeaders.get('authorization')).toBe('Bearer expired-access-token')
+    expect(secondHeaders.get('authorization')).toBe('Bearer fresh-access-token')
+    expect(secondHeaders.get('chatgpt-account-id')).toBe('acct-123')
   })
 })

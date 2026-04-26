@@ -12,9 +12,8 @@ import {
   LEGACY_AGENT_TOOL_NAME,
 } from 'src/tools/AgentTool/constants.js'
 import {
-  resolveOpenAIApiKeyEnvKey,
+  getOpenAIAuthConfig,
   isOpenAIResponsesBackendEnabled,
-  loadCodexAuthConfig,
 } from 'src/services/modelBackend/openaiCodexConfig.js'
 import { getAnthropicApiKeyWithSource } from '../auth.js'
 import { getCwd } from '../cwd.js'
@@ -58,17 +57,8 @@ export type SystemInitInputs = {
 export function buildSystemInitMessage(inputs: SystemInitInputs): SDKMessage {
   const settings = getSettings_DEPRECATED()
   const outputStyle = settings?.outputStyle ?? DEFAULT_OUTPUT_STYLE_NAME
-  const configuredEnvKey = resolveOpenAIApiKeyEnvKey()
-
   const apiKeySource = isOpenAIResponsesBackendEnabled()
-    ? process.env[configuredEnvKey]?.trim()
-      ? configuredEnvKey
-      : configuredEnvKey !== 'OPENAI_API_KEY' &&
-          process.env.OPENAI_API_KEY?.trim()
-        ? 'OPENAI_API_KEY'
-      : loadCodexAuthConfig().openaiApiKey
-        ? '~/.codex/auth.json'
-        : 'none'
+    ? getOpenAIAuthConfig()?.source ?? 'none'
     : getAnthropicApiKeyWithSource().source
 
   const initMessage: SDKMessage = {
