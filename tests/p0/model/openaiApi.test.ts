@@ -16,6 +16,20 @@ type LoadOptions = {
     accountId?: string
     refreshable: boolean
   }
+  fallbackAuthConfig?: {
+    mode: 'api_key' | 'chatgpt'
+    bearerToken: string
+    source: string
+    accountId?: string
+    refreshable: boolean
+    isFallback?: boolean
+    providerConfig?: {
+      baseUrl: string
+      model?: string
+      queryParams?: Record<string, string>
+      httpHeaders?: Record<string, string>
+    }
+  }
   baseUrl?: string
   providerHeaders?: Record<string, string> | undefined
   providerQueryParams?: Record<string, string> | undefined
@@ -30,6 +44,7 @@ async function loadOpenAIApiModule(options: LoadOptions = {}) {
 
   vi.doMock('../../../src/services/modelBackend/openaiCodexConfig.js', () => ({
     describeOpenAIApiKeySources: () => 'OPENAI_API_KEY or ~/.codex/auth.json',
+    getOpenAIFallbackAuthConfig: () => options.fallbackAuthConfig,
     getOpenAIAuthConfig: () =>
       options.authConfig ??
       (options.apiKey
@@ -44,9 +59,14 @@ async function loadOpenAIApiModule(options: LoadOptions = {}) {
     getMissingOpenAIApiKeyMessage: () =>
       'No OpenAI/Codex API key is configured. Expected OPENAI_API_KEY or ~/.codex/auth.json.',
     refreshOpenAIChatGPTAuthToken: async () => options.refreshedAuthConfig,
-    resolveOpenAIBaseUrl: () => options.baseUrl ?? 'https://api.example.com/v1',
-    resolveOpenAIProviderHeaders: () => options.providerHeaders,
-    resolveOpenAIProviderQueryParams: () => options.providerQueryParams,
+    resolveOpenAIBaseUrl: (authConfig?: LoadOptions['fallbackAuthConfig']) =>
+      authConfig?.providerConfig?.baseUrl ??
+      options.baseUrl ??
+      'https://api.example.com/v1',
+    resolveOpenAIProviderHeaders: (authConfig?: LoadOptions['fallbackAuthConfig']) =>
+      authConfig?.providerConfig?.httpHeaders ?? options.providerHeaders,
+    resolveOpenAIProviderQueryParams: (authConfig?: LoadOptions['fallbackAuthConfig']) =>
+      authConfig?.providerConfig?.queryParams ?? options.providerQueryParams,
     shouldUseOpenAIOfficialClientHeaders: () =>
       options.officialHeaders ?? false,
   }))
@@ -422,5 +442,57 @@ describe('openaiApi fork contracts', () => {
     expect(firstHeaders.get('authorization')).toBe('Bearer expired-access-token')
     expect(secondHeaders.get('authorization')).toBe('Bearer fresh-access-token')
     expect(secondHeaders.get('chatgpt-account-id')).toBe('acct-123')
+  })
+
+  it('[P0:model] falls back from ChatGPT quota errors to fixed API fallback auth', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response('{"error":{"message":"usage limit reached"}}', {
+          status: 429,
+        }),
+      )
+      .mockResolvedValueOnce(new Response('{"ok":true}', { status: 200 }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    const api = await loadOpenAIApiModule({
+      baseUrl: 'https://chatgpt.com/backend-api/codex',
+      authConfig: {
+        mode: 'chatgpt',
+        bearerToken: 'chatgpt-access-token',
+        source: '~/.codex/auth.json',
+        accountId: 'acct-123',
+        refreshable: true,
+      },
+      fallbackAuthConfig: {
+        mode: 'api_key',
+        bearerToken: 'fallback-api-key',
+        source: '~/.codex/auth.fallback.json',
+        refreshable: false,
+        isFallback: true,
+        providerConfig: {
+          baseUrl: 'https://fallback.example.com/v1',
+          model: 'fallback-model',
+          queryParams: { 'api-version': 'fallback' },
+          httpHeaders: { 'x-fallback': '1' },
+        },
+      },
+    })
+
+    await api.fetchOpenAIResponse('/responses', {
+      method: 'POST',
+      body: { model: 'chatgpt-model', ok: true },
+    })
+
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+    const [fallbackUrl, fallbackInit] = fetchMock.mock.calls[1]!
+    expect(fallbackUrl).toBe(
+      'https://fallback.example.com/v1/responses?api-version=fallback',
+    )
+    const fallbackHeaders = fallbackInit?.headers as Headers
+    expect(fallbackHeaders.get('authorization')).toBe('Bearer fallback-api-key')
+    expect(fallbackHeaders.get('chatgpt-account-id')).toBeNull()
+    expect(fallbackHeaders.get('x-fallback')).toBe('1')
+    expect(fallbackInit?.body).toBe('{"model":"fallback-model","ok":true}')
   })
 })

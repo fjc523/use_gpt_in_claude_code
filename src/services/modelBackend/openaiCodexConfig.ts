@@ -5,7 +5,7 @@ import { normalizeOpenAICompatibleModel } from './openaiModelCatalog.js'
 
 type StringMap = Record<string, string>
 
-type CodexProviderConfig = {
+export type CodexProviderConfig = {
   providerId: string
   model: string
   disableResponseStorage: boolean
@@ -42,6 +42,8 @@ export type OpenAIAuthConfig = {
   source: string
   accountId?: string
   refreshable: boolean
+  providerConfig?: CodexProviderConfig
+  isFallback?: boolean
 }
 
 export type OpenAIReasoningEffort =
@@ -54,11 +56,15 @@ export type OpenAIReasoningEffort =
 
 let cachedProviderConfig: CodexProviderConfig | null | undefined
 let cachedAuthConfig: CodexAuthConfig | null | undefined
+let cachedFallbackProviderConfig: CodexProviderConfig | null | undefined
+let cachedFallbackAuthConfig: CodexAuthConfig | null | undefined
 
 const DEFAULT_MODEL = 'gpt-5.4'
 const DEFAULT_BASE_URL = 'https://api.openai.com/v1'
 const DEFAULT_CHATGPT_BASE_URL = 'https://chatgpt.com/backend-api/codex'
 const DEFAULT_ENV_KEY = 'OPENAI_API_KEY'
+const FALLBACK_CONFIG_FILENAME = 'config.fallback.toml'
+const FALLBACK_AUTH_FILENAME = 'auth.fallback.json'
 const CHATGPT_REFRESH_TOKEN_URL = 'https://auth.openai.com/oauth/token'
 const CHATGPT_REFRESH_TOKEN_URL_ENV = 'CODEX_REFRESH_TOKEN_URL_OVERRIDE'
 const CODEX_CHATGPT_CLIENT_ID = 'app_EMoamEEZ73f0CkXaXp7hrann'
@@ -69,6 +75,14 @@ function getCodexConfigPath(): string {
 
 function getCodexAuthPath(): string {
   return join(homedir(), '.codex', 'auth.json')
+}
+
+function getCodexFallbackConfigPath(): string {
+  return join(homedir(), '.codex', FALLBACK_CONFIG_FILENAME)
+}
+
+function getCodexFallbackAuthPath(): string {
+  return join(homedir(), '.codex', FALLBACK_AUTH_FILENAME)
 }
 
 function readIfExists(path: string): string | null {
@@ -253,7 +267,11 @@ function normalizeEnvKey(envKey: string | undefined): string {
 }
 
 function getConfiguredApiKeyEnvNames(): string[] {
-  const configured = normalizeEnvKey(loadCodexProviderConfig().envKey)
+  return getApiKeyEnvNamesForProvider(loadCodexProviderConfig())
+}
+
+function getApiKeyEnvNamesForProvider(providerConfig: CodexProviderConfig): string[] {
+  const configured = normalizeEnvKey(providerConfig.envKey)
   return configured === DEFAULT_ENV_KEY
     ? [DEFAULT_ENV_KEY]
     : [configured, DEFAULT_ENV_KEY]
@@ -261,6 +279,10 @@ function getConfiguredApiKeyEnvNames(): string[] {
 
 function getConfiguredAuthJsonKeyNames(): string[] {
   return getConfiguredApiKeyEnvNames()
+}
+
+function getAuthJsonKeyNamesForProvider(providerConfig: CodexProviderConfig): string[] {
+  return getApiKeyEnvNamesForProvider(providerConfig)
 }
 
 function getEffectiveProviderId(raw: string, profileSection: string): string {
@@ -279,34 +301,27 @@ function getEffectiveModel(raw: string, profileSection: string): string {
   )
 }
 
-export function loadCodexProviderConfig(): CodexProviderConfig {
-  if (cachedProviderConfig) return cachedProviderConfig
-  if (cachedProviderConfig === null) {
-    return {
-      providerId: 'openai',
-      model: DEFAULT_MODEL,
-      disableResponseStorage: true,
-      baseUrl: DEFAULT_BASE_URL,
-      baseUrlExplicit: false,
-      wireApi: 'responses',
-      envKey: DEFAULT_ENV_KEY,
-      requiresOpenAIAuth: false,
-      promptCacheRetention: undefined,
-      modelContextWindow: undefined,
-      reasoningEffort: undefined,
-      httpHeaders: undefined,
-      envHttpHeaders: undefined,
-      queryParams: undefined,
-      experimentalBearerToken: undefined,
-    }
+function getDefaultProviderConfig(): CodexProviderConfig {
+  return {
+    providerId: 'openai',
+    model: DEFAULT_MODEL,
+    disableResponseStorage: true,
+    baseUrl: DEFAULT_BASE_URL,
+    baseUrlExplicit: false,
+    wireApi: 'responses',
+    envKey: DEFAULT_ENV_KEY,
+    requiresOpenAIAuth: false,
+    promptCacheRetention: undefined,
+    modelContextWindow: undefined,
+    reasoningEffort: undefined,
+    httpHeaders: undefined,
+    envHttpHeaders: undefined,
+    queryParams: undefined,
+    experimentalBearerToken: undefined,
   }
+}
 
-  const raw = readIfExists(getCodexConfigPath())
-  if (!raw) {
-    cachedProviderConfig = null
-    return loadCodexProviderConfig()
-  }
-
+function parseCodexProviderConfig(raw: string): CodexProviderConfig {
   const profileSection = getActiveProfileSection(raw)
   const providerId = getEffectiveProviderId(raw, profileSection)
   const providerSection = getTableSection(raw, `model_providers.${providerId}`)
@@ -329,8 +344,7 @@ export function loadCodexProviderConfig(): CodexProviderConfig {
     providerSection,
     /^\s*base_url\s*=\s*"([^"]+)"/m,
   )
-  const baseUrl =
-    providerBaseUrl || openaiBaseUrl || DEFAULT_BASE_URL
+  const baseUrl = providerBaseUrl || openaiBaseUrl || DEFAULT_BASE_URL
   const baseUrlExplicit = Boolean(providerBaseUrl || openaiBaseUrl)
   const wireApi =
     matchString(providerSection, /^\s*wire_api\s*=\s*"([^"]+)"/m) ||
@@ -377,7 +391,7 @@ export function loadCodexProviderConfig(): CodexProviderConfig {
     /^\s*experimental_bearer_token\s*=\s*"([^"]+)"/m,
   )
 
-  cachedProviderConfig = {
+  return {
     providerId,
     model: normalizeOpenAICompatibleModel(topLevelModel) ?? topLevelModel,
     disableResponseStorage,
@@ -394,7 +408,36 @@ export function loadCodexProviderConfig(): CodexProviderConfig {
     queryParams,
     experimentalBearerToken,
   }
+}
+
+export function loadCodexProviderConfig(): CodexProviderConfig {
+  if (cachedProviderConfig) return cachedProviderConfig
+  if (cachedProviderConfig === null) {
+    return getDefaultProviderConfig()
+  }
+
+  const raw = readIfExists(getCodexConfigPath())
+  if (!raw) {
+    cachedProviderConfig = null
+    return loadCodexProviderConfig()
+  }
+
+  cachedProviderConfig = parseCodexProviderConfig(raw)
   return cachedProviderConfig
+}
+
+export function loadOpenAIFallbackProviderConfig(): CodexProviderConfig | undefined {
+  if (cachedFallbackProviderConfig) return cachedFallbackProviderConfig
+  if (cachedFallbackProviderConfig === null) return undefined
+
+  const raw = readIfExists(getCodexFallbackConfigPath())
+  if (!raw) {
+    cachedFallbackProviderConfig = null
+    return undefined
+  }
+
+  cachedFallbackProviderConfig = parseCodexProviderConfig(raw)
+  return cachedFallbackProviderConfig
 }
 
 export function isOpenAIResponsesBackendEnabled(): boolean {
@@ -405,16 +448,10 @@ export function isOpenAIResponsesBackendEnabled(): boolean {
   return configured.toLowerCase() !== 'claude'
 }
 
-export function loadCodexAuthConfig(): CodexAuthConfig {
-  if (cachedAuthConfig) return cachedAuthConfig
-  if (cachedAuthConfig === null) return {}
-
-  const raw = readIfExists(getCodexAuthPath())
-  if (!raw) {
-    cachedAuthConfig = null
-    return {}
-  }
-
+function parseCodexAuthConfig(
+  raw: string,
+  authJsonKeyNames: string[],
+): CodexAuthConfig {
   try {
     const parsed = JSON.parse(raw) as Record<string, unknown>
     const authMode = normalizeAuthMode(
@@ -425,10 +462,10 @@ export function loadCodexAuthConfig(): CodexAuthConfig {
     const tokens = getAuthJsonTokens(parsed)
     const openaiApiKey = isChatGPTAuth
       ? undefined
-      : getConfiguredAuthJsonKeyNames()
+      : authJsonKeyNames
           .map(key => getRecordString(parsed, key))
           .find(value => Boolean(value))
-    cachedAuthConfig = {
+    return {
       authMode,
       openaiApiKey,
       chatgptAccessToken: isChatGPTAuth
@@ -442,15 +479,62 @@ export function loadCodexAuthConfig(): CodexAuthConfig {
         : undefined,
       lastRefresh: getRecordString(parsed, 'last_refresh'),
     }
-    return cachedAuthConfig
   } catch {
-    cachedAuthConfig = null
     return {}
   }
 }
 
+export function loadCodexAuthConfig(): CodexAuthConfig {
+  if (cachedAuthConfig) return cachedAuthConfig
+  if (cachedAuthConfig === null) return {}
+
+  const raw = readIfExists(getCodexAuthPath())
+  if (!raw) {
+    cachedAuthConfig = null
+    return {}
+  }
+
+  cachedAuthConfig = parseCodexAuthConfig(raw, getConfiguredAuthJsonKeyNames())
+  return cachedAuthConfig
+}
+
+export function loadOpenAIFallbackAuthConfig(): CodexAuthConfig {
+  if (cachedFallbackAuthConfig) return cachedFallbackAuthConfig
+  if (cachedFallbackAuthConfig === null) return {}
+
+  const providerConfig = loadOpenAIFallbackProviderConfig()
+  if (!providerConfig) {
+    cachedFallbackAuthConfig = null
+    return {}
+  }
+
+  const raw = readIfExists(getCodexFallbackAuthPath())
+  if (!raw) {
+    cachedFallbackAuthConfig = null
+    return {}
+  }
+
+  cachedFallbackAuthConfig = parseCodexAuthConfig(
+    raw,
+    getAuthJsonKeyNamesForProvider(providerConfig),
+  )
+  return cachedFallbackAuthConfig
+}
+
 export function getOpenAIAuthConfig(): OpenAIAuthConfig | undefined {
-  for (const envName of getConfiguredApiKeyEnvNames()) {
+  const providerConfig = loadCodexProviderConfig()
+  const auth = loadCodexAuthConfig()
+  if (auth.chatgptAccessToken) {
+    return {
+      mode: 'chatgpt',
+      bearerToken: auth.chatgptAccessToken,
+      source: '~/.codex/auth.json',
+      accountId: auth.chatgptAccountId,
+      refreshable: Boolean(auth.chatgptRefreshToken),
+    }
+  }
+
+  for (const envName of getApiKeyEnvNamesForProvider(providerConfig)) {
     const envKey = process.env[envName]?.trim()
     if (envKey) {
       return {
@@ -462,7 +546,6 @@ export function getOpenAIAuthConfig(): OpenAIAuthConfig | undefined {
     }
   }
 
-  const providerConfig = loadCodexProviderConfig()
   if (providerConfig.experimentalBearerToken?.trim()) {
     return {
       mode: 'api_key',
@@ -472,7 +555,6 @@ export function getOpenAIAuthConfig(): OpenAIAuthConfig | undefined {
     }
   }
 
-  const auth = loadCodexAuthConfig()
   if (auth.openaiApiKey) {
     return {
       mode: 'api_key',
@@ -481,13 +563,36 @@ export function getOpenAIAuthConfig(): OpenAIAuthConfig | undefined {
       refreshable: false,
     }
   }
-  if (auth.chatgptAccessToken) {
+
+  return undefined
+}
+
+export function getOpenAIFallbackAuthConfig(): OpenAIAuthConfig | undefined {
+  const providerConfig = loadOpenAIFallbackProviderConfig()
+  if (!providerConfig) {
+    return undefined
+  }
+
+  const auth = loadOpenAIFallbackAuthConfig()
+  if (auth.openaiApiKey) {
     return {
-      mode: 'chatgpt',
-      bearerToken: auth.chatgptAccessToken,
-      source: '~/.codex/auth.json',
-      accountId: auth.chatgptAccountId,
-      refreshable: Boolean(auth.chatgptRefreshToken),
+      mode: 'api_key',
+      bearerToken: auth.openaiApiKey,
+      source: '~/.codex/auth.fallback.json',
+      refreshable: false,
+      providerConfig,
+      isFallback: true,
+    }
+  }
+
+  if (providerConfig.experimentalBearerToken?.trim()) {
+    return {
+      mode: 'api_key',
+      bearerToken: providerConfig.experimentalBearerToken.trim(),
+      source: '~/.codex/config.fallback.toml',
+      refreshable: false,
+      providerConfig,
+      isFallback: true,
     }
   }
 
@@ -515,10 +620,17 @@ export function getMissingOpenAIApiKeyMessage(): string {
   return `No OpenAI/Codex API key is configured. Expected ${describeOpenAIApiKeySources()}.`
 }
 
-export function resolveOpenAIBaseUrl(): string {
-  const provider = loadCodexProviderConfig()
+function getProviderConfigForAuth(
+  authConfig?: OpenAIAuthConfig,
+): CodexProviderConfig {
+  return authConfig?.providerConfig ?? loadCodexProviderConfig()
+}
+
+export function resolveOpenAIBaseUrl(authConfig?: OpenAIAuthConfig): string {
+  const provider = getProviderConfigForAuth(authConfig)
   const envBaseUrl = process.env.OPENAI_BASE_URL
   if (
+    !authConfig?.isFallback &&
     !envBaseUrl &&
     !provider.baseUrlExplicit &&
     resolveOpenAIAuthMode() === 'chatgpt'
@@ -593,8 +705,10 @@ export async function refreshOpenAIChatGPTAuthToken(): Promise<
   return getOpenAIAuthConfig()
 }
 
-export function resolveOpenAIProviderHeaders(): StringMap | undefined {
-  const config = loadCodexProviderConfig()
+export function resolveOpenAIProviderHeaders(
+  authConfig?: OpenAIAuthConfig,
+): StringMap | undefined {
+  const config = getProviderConfigForAuth(authConfig)
   const envHeaders = Object.fromEntries(
     Object.entries(config.envHttpHeaders ?? {}).flatMap(([headerName, envName]) => {
       const value = process.env[envName]?.trim()
@@ -605,12 +719,16 @@ export function resolveOpenAIProviderHeaders(): StringMap | undefined {
   return mergeStringMaps(config.httpHeaders, envHeaders)
 }
 
-export function resolveOpenAIProviderQueryParams(): StringMap | undefined {
-  return loadCodexProviderConfig().queryParams
+export function resolveOpenAIProviderQueryParams(
+  authConfig?: OpenAIAuthConfig,
+): StringMap | undefined {
+  return getProviderConfigForAuth(authConfig).queryParams
 }
 
-export function shouldUseOpenAIOfficialClientHeaders(): boolean {
-  return loadCodexProviderConfig().requiresOpenAIAuth
+export function shouldUseOpenAIOfficialClientHeaders(
+  authConfig?: OpenAIAuthConfig,
+): boolean {
+  return getProviderConfigForAuth(authConfig).requiresOpenAIAuth
 }
 
 export function resolveOpenAIModel(currentModel: string | undefined): string {

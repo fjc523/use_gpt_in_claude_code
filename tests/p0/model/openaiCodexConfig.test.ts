@@ -34,6 +34,8 @@ function restoreEnv() {
 async function loadCodexConfigModule(options?: {
   configToml?: string
   authJson?: string
+  fallbackConfigToml?: string
+  fallbackAuthJson?: string
   env?: Partial<Record<(typeof ENV_KEYS)[number], string | undefined>>
 }) {
   restoreEnv()
@@ -51,6 +53,15 @@ async function loadCodexConfigModule(options?: {
   }
   if (options?.authJson !== undefined) {
     files.set(`${MOCK_HOME}/.codex/auth.json`, options.authJson)
+  }
+  if (options?.fallbackConfigToml !== undefined) {
+    files.set(
+      `${MOCK_HOME}/.codex/config.fallback.toml`,
+      options.fallbackConfigToml,
+    )
+  }
+  if (options?.fallbackAuthJson !== undefined) {
+    files.set(`${MOCK_HOME}/.codex/auth.fallback.json`, options.fallbackAuthJson)
   }
 
   vi.resetModules()
@@ -382,6 +393,43 @@ describe('openaiCodexConfig fork contracts', () => {
       env: { OPENAI_BASE_URL: 'https://env.example.com/v1/responses/' },
     })
     expect(envBase.resolveOpenAIBaseUrl()).toBe('https://env.example.com/v1')
+  })
+
+  it('[P0:model] loads API fallback credentials from fixed fallback config and auth files', async () => {
+    const configured = await loadCodexConfigModule({
+      authJson: '{"auth_mode":"chatgpt","tokens":{"access_token":"chatgpt-token","account_id":"acct-123"}}',
+      fallbackConfigToml: [
+        'model_provider = "codex"',
+        'model = "gpt-5.5"',
+        '[model_providers.codex]',
+        'base_url = "https://fallback.example.com/codex"',
+        'env_key = "CODEX_API_KEY"',
+        'query_params = { source = "fallback" }',
+        'http_headers = { "X-Fallback" = "1" }',
+      ].join('\n'),
+      fallbackAuthJson: '{"auth_mode":"apikey","CODEX_API_KEY":" fallback-key "}',
+    })
+
+    expect(configured.getOpenAIAuthConfig()).toMatchObject({
+      mode: 'chatgpt',
+      bearerToken: 'chatgpt-token',
+    })
+    const fallbackAuth = configured.getOpenAIFallbackAuthConfig()
+    expect(fallbackAuth).toMatchObject({
+      mode: 'api_key',
+      bearerToken: 'fallback-key',
+      source: '~/.codex/auth.fallback.json',
+      isFallback: true,
+    })
+    expect(configured.resolveOpenAIBaseUrl(fallbackAuth)).toBe(
+      'https://fallback.example.com/codex',
+    )
+    expect(configured.resolveOpenAIProviderHeaders(fallbackAuth)).toEqual({
+      'X-Fallback': '1',
+    })
+    expect(configured.resolveOpenAIProviderQueryParams(fallbackAuth)).toEqual({
+      source: 'fallback',
+    })
   })
 
   it('[P0:model] lets top-level prompt-cache retention, context window, and reasoning effort override provider-section values', async () => {

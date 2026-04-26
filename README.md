@@ -29,6 +29,13 @@ npm upgrade -g @zju_han/claudex-cli
 
 ChatGPT 登录态会自动切到 Codex ChatGPT 后端，并在访问令牌过期后尝试用 refresh token 刷新一次。也就是说，已经通过 `codex login` 登录 ChatGPT 的机器通常不需要额外配置 `OPENAI_API_KEY`。
 
+如果希望 ChatGPT 额度耗尽后自动切到 API fallback，可以固定配置：
+
+- `~/.codex/config.fallback.toml`：fallback API provider / model / base_url 配置
+- `~/.codex/auth.fallback.json`：fallback API key，格式为 `{"auth_mode":"apikey","CODEX_API_KEY":"..."}` 或 `{"auth_mode":"apikey","OPENAI_API_KEY":"..."}`
+
+运行时默认优先使用 ChatGPT 登录态；当 ChatGPT 返回 quota / usage limit / rate limit / credits exhausted 等错误时，会自动改用 fallback API 配置。fallback 有短期 cooldown，默认 30 分钟，可以用 `CLAUDEX_CHATGPT_FALLBACK_COOLDOWN_MS` 调整。
+
 可以用下面命令检查当前实际生效的认证方式：
 
 ```bash
@@ -47,6 +54,7 @@ claudex
 
 1. 使用codex配置使用claude code
 2. 默认启动了claude code 供内部使用的配置
+3. 默认启动为 full access / bypass permissions 模式；如需恢复普通审批模式，可使用 `--permission-mode default` 或在 settings 中配置 `permissions.defaultMode`
 
 ## 2. opus 模式（默认）
 

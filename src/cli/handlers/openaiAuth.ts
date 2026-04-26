@@ -3,6 +3,7 @@
 import { BRAND_NAME } from '../../constants/brand.js'
 import {
   describeOpenAIApiKeySources,
+  getOpenAIFallbackAuthConfig,
   getOpenAIAuthConfig,
   getOpenAIApiKey,
   getMissingOpenAIApiKeyMessage,
@@ -86,6 +87,7 @@ async function validateConfiguredKey(): Promise<{
 function getStatusPayload() {
   const provider = loadCodexProviderConfig()
   const apiKeySource = getApiKeySource()
+  const fallbackAuth = getOpenAIFallbackAuthConfig()
 
   return {
     loggedIn: apiKeySource !== 'none',
@@ -100,6 +102,9 @@ function getStatusPayload() {
     wireApi: provider.wireApi,
     storeResponses: shouldStoreOpenAIResponses(),
     apiKeySource: apiKeySource === 'none' ? null : apiKeySource,
+    fallbackApiKeySource: fallbackAuth?.source ?? null,
+    fallbackBaseUrl: fallbackAuth ? resolveOpenAIBaseUrl(fallbackAuth) : null,
+    fallbackModel: fallbackAuth?.providerConfig?.model ?? null,
   }
 }
 
@@ -146,6 +151,15 @@ export async function authStatus(opts: {
     process.stdout.write(
       `Credentials: ${status.apiKeySource ?? 'not configured'}\n`,
     )
+    process.stdout.write(
+      `Fallback credentials: ${status.fallbackApiKeySource ?? 'not configured'}\n`,
+    )
+    if (status.fallbackBaseUrl) {
+      process.stdout.write(`Fallback Base URL: ${status.fallbackBaseUrl}\n`)
+    }
+    if (status.fallbackModel) {
+      process.stdout.write(`Fallback Model: ${status.fallbackModel}\n`)
+    }
     if (!status.loggedIn) {
       process.stdout.write(
         `Not configured. Set ${describeOpenAIApiKeySources()}.\n`,

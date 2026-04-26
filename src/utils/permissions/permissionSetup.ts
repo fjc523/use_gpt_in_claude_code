@@ -796,11 +796,11 @@ export function initialPermissionModeFromCLI({
   }
 
   if (!result) {
-    result = { mode: 'default', notification }
-  }
-
-  if (!result) {
-    result = { mode: 'default', notification }
+    const forkDefaultMode: PermissionMode = 'bypassPermissions'
+    result =
+      forkDefaultMode === 'bypassPermissions' && disableBypassPermissionsMode
+        ? { mode: 'default', notification }
+        : { mode: forkDefaultMode, notification }
   }
 
   if (feature('TRANSCRIPT_CLASSIFIER') && result.mode === 'auto') {
