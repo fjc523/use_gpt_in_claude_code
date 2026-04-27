@@ -99,7 +99,7 @@ describe('openaiCodexConfig fork contracts', () => {
 
     expect(defaults.loadCodexProviderConfig()).toMatchObject({
       providerId: 'openai',
-      model: 'gpt-5.4',
+      model: 'gpt-5.5',
       disableResponseStorage: true,
       baseUrl: 'https://api.openai.com/v1',
       wireApi: 'responses',
@@ -122,7 +122,7 @@ describe('openaiCodexConfig fork contracts', () => {
     const fromConfig = await loadCodexConfigModule({
       configToml: 'model = "best"\n',
     })
-    expect(fromConfig.resolveOpenAIModel('claude-custom')).toBe('gpt-5.4')
+    expect(fromConfig.resolveOpenAIModel('claude-custom')).toBe('gpt-5.5')
   })
 
   it('[P0:model] resolves model selection by current argument before env and config, with alias normalization at each layer', async () => {
@@ -130,7 +130,7 @@ describe('openaiCodexConfig fork contracts', () => {
       configToml: 'model = "haiku"\n',
       env: { OPENAI_MODEL: 'best' },
     })
-    expect(withEnvAndConfig.resolveOpenAIModel(undefined)).toBe('gpt-5.4')
+    expect(withEnvAndConfig.resolveOpenAIModel(undefined)).toBe('gpt-5.5')
     expect(withEnvAndConfig.resolveOpenAIModel('sonnet')).toBe('gpt-5.2')
 
     const configOnly = await loadCodexConfigModule({

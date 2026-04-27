@@ -1,8 +1,9 @@
-const GPT_5_4_CONTEXT_WINDOW = 1_000_000
+const GPT_5_FRONTIER_CONTEXT_WINDOW = 1_000_000
 const GPT_5_CONTEXT_WINDOW = 272_000
 const GPT_OSS_CONTEXT_WINDOW = 128_000
 
 export const OPENAI_CODEX_MODEL_IDS = [
+  'gpt-5.5',
   'gpt-5.4',
   'gpt-5.4-mini',
   'gpt-5.3-codex',
@@ -30,10 +31,17 @@ export type OpenAICodexModelCatalogEntry = {
 
 const OPENAI_CODEX_MODEL_CATALOG: readonly OpenAICodexModelCatalogEntry[] = [
   {
-    id: 'gpt-5.4',
-    label: 'GPT-5.4',
+    id: 'gpt-5.5',
+    label: 'GPT-5.5',
     description:
       'Recommended default for coding, planning, and broader general-purpose work',
+    defaultEffort: 'medium',
+    supportedEffortLevels: ['none', 'low', 'medium', 'high', 'xhigh'],
+  },
+  {
+    id: 'gpt-5.4',
+    label: 'GPT-5.4',
+    description: 'Previous frontier general-purpose GPT-5.4 model',
     defaultEffort: 'none',
     supportedEffortLevels: ['none', 'low', 'medium', 'high', 'xhigh'],
   },
@@ -80,15 +88,15 @@ const OPENAI_CODEX_MODEL_CATALOG: readonly OpenAICodexModelCatalogEntry[] = [
 ] as const
 
 const OPENAI_LEGACY_MODEL_ALIASES: Record<string, OpenAICodexModelId> = {
-  best: 'gpt-5.4',
-  opus: 'gpt-5.4',
-  'opus[1m]': 'gpt-5.4',
-  opusplan: 'gpt-5.4',
+  best: 'gpt-5.5',
+  opus: 'gpt-5.5',
+  'opus[1m]': 'gpt-5.5',
+  opusplan: 'gpt-5.5',
   sonnet: 'gpt-5.2',
   'sonnet[1m]': 'gpt-5.2',
   haiku: 'gpt-5-mini',
-  gpt: 'gpt-5.4',
-  'gpt-5': 'gpt-5.4',
+  gpt: 'gpt-5.5',
+  'gpt-5': 'gpt-5.5',
 }
 
 function normalizeOpenAIModelString(model: string | undefined): string | undefined {
@@ -172,15 +180,17 @@ export function getKnownOpenAIContextWindow(
     return undefined
   }
 
-  // Current official docs explicitly call out GPT-5.4 and GPT-5.4 pro as the
-  // 1M-context GPT-5 family variants.
   if (
+    normalized === 'gpt-5.5' ||
+    normalized === 'gpt-5.5-pro' ||
+    /^gpt-5\.5-\d{4}-\d{2}-\d{2}$/.test(normalized) ||
+    /^gpt-5\.5-pro-\d{4}-\d{2}-\d{2}$/.test(normalized) ||
     normalized === 'gpt-5.4' ||
     normalized === 'gpt-5.4-pro' ||
     /^gpt-5\.4-\d{4}-\d{2}-\d{2}$/.test(normalized) ||
     /^gpt-5\.4-pro-\d{4}-\d{2}-\d{2}$/.test(normalized)
   ) {
-    return GPT_5_4_CONTEXT_WINDOW
+    return GPT_5_FRONTIER_CONTEXT_WINDOW
   }
 
   if (normalized.startsWith('gpt-5')) {

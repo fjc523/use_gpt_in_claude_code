@@ -59,7 +59,7 @@ let cachedAuthConfig: CodexAuthConfig | null | undefined
 let cachedFallbackProviderConfig: CodexProviderConfig | null | undefined
 let cachedFallbackAuthConfig: CodexAuthConfig | null | undefined
 
-const DEFAULT_MODEL = 'gpt-5.4'
+const DEFAULT_MODEL = 'gpt-5.5'
 const DEFAULT_BASE_URL = 'https://api.openai.com/v1'
 const DEFAULT_CHATGPT_BASE_URL = 'https://chatgpt.com/backend-api/codex'
 const DEFAULT_ENV_KEY = 'OPENAI_API_KEY'

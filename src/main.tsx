@@ -236,7 +236,7 @@ function getBareModeDescription(): string {
 
 function getModelOptionDescription(): string {
   if (isOpenAIBackendEnabledForCli()) {
-    return "Model for the current session. Legacy aliases like 'best', 'opus', 'sonnet', and 'haiku' are mapped onto the OpenAI/Codex model catalog for compatibility, or provide a full model name such as 'gpt-5.4', 'gpt-5.4-mini', 'gpt-5.3-codex', or 'gpt-5-mini'."
+    return "Model for the current session. Legacy aliases like 'best', 'opus', 'sonnet', and 'haiku' are mapped onto the OpenAI/Codex model catalog for compatibility, or provide a full model name such as 'gpt-5.5', 'gpt-5.4', 'gpt-5.4-mini', 'gpt-5.3-codex', or 'gpt-5-mini'."
   }
   return "Model for the current session. Provide an alias for the latest model (e.g. 'sonnet' or 'opus') or a model's full name (e.g. 'claude-sonnet-4-6')."
 }
