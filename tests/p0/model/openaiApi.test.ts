@@ -58,11 +58,16 @@ async function loadOpenAIApiModule(options: LoadOptions = {}) {
     getOpenAIApiKey: () => options.apiKey,
     getMissingOpenAIApiKeyMessage: () =>
       'No OpenAI/Codex API key is configured. Expected OPENAI_API_KEY or ~/.codex/auth.json.',
+    loadCodexProviderConfig: () => ({
+      providerId: 'openai',
+      model: 'primary-model',
+    }),
     refreshOpenAIChatGPTAuthToken: async () => options.refreshedAuthConfig,
     resolveOpenAIBaseUrl: (authConfig?: LoadOptions['fallbackAuthConfig']) =>
       authConfig?.providerConfig?.baseUrl ??
       options.baseUrl ??
       'https://api.example.com/v1',
+    resolveOpenAIModel: () => 'primary-model',
     resolveOpenAIProviderHeaders: (authConfig?: LoadOptions['fallbackAuthConfig']) =>
       authConfig?.providerConfig?.httpHeaders ?? options.providerHeaders,
     resolveOpenAIProviderQueryParams: (authConfig?: LoadOptions['fallbackAuthConfig']) =>
@@ -494,5 +499,11 @@ describe('openaiApi fork contracts', () => {
     expect(fallbackHeaders.get('chatgpt-account-id')).toBeNull()
     expect(fallbackHeaders.get('x-fallback')).toBe('1')
     expect(fallbackInit?.body).toBe('{"model":"fallback-model","ok":true}')
+    expect(api.getOpenAIActiveConnectionSnapshot()).toMatchObject({
+      role: 'fallback',
+      baseUrl: 'https://fallback.example.com/v1',
+      model: 'fallback-model',
+      credentialSource: '~/.codex/auth.fallback.json',
+    })
   })
 })

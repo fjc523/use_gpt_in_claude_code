@@ -42,6 +42,8 @@ ChatGPT 登录态会自动切到 Codex ChatGPT 后端，并在访问令牌过期
 claudex auth status --text
 ```
 
+在 `claudex` 会话内也可以用 `/status` 查看主备连接。`Current source` 会显示最近一次实际成功使用的源；会话刚启动且尚未发起模型请求时，它显示下一次请求将优先使用的主连接。
+
 ### 启动
 
 ```bash
