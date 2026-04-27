@@ -31,14 +31,24 @@ function restoreEnv() {
   }
 }
 
+function clearEnvForModuleLoad() {
+  for (const key of ENV_KEYS) {
+    delete process.env[key]
+  }
+}
+
 async function loadCodexConfigModule(options?: {
   configToml?: string
   authJson?: string
   fallbackConfigToml?: string
   fallbackAuthJson?: string
+  fallbackOpenAIConfigToml?: string
+  fallbackOpenAIAuthJson?: string
+  fallbackClaudexAIConfigToml?: string
+  fallbackClaudexAIAuthJson?: string
   env?: Partial<Record<(typeof ENV_KEYS)[number], string | undefined>>
 }) {
-  restoreEnv()
+  clearEnvForModuleLoad()
   for (const [key, value] of Object.entries(options?.env ?? {})) {
     if (value === undefined) {
       delete process.env[key]
@@ -62,6 +72,30 @@ async function loadCodexConfigModule(options?: {
   }
   if (options?.fallbackAuthJson !== undefined) {
     files.set(`${MOCK_HOME}/.codex/auth.fallback.json`, options.fallbackAuthJson)
+  }
+  if (options?.fallbackOpenAIConfigToml !== undefined) {
+    files.set(
+      `${MOCK_HOME}/.codex/config.toml.openai`,
+      options.fallbackOpenAIConfigToml,
+    )
+  }
+  if (options?.fallbackOpenAIAuthJson !== undefined) {
+    files.set(
+      `${MOCK_HOME}/.codex/auth.json.openai`,
+      options.fallbackOpenAIAuthJson,
+    )
+  }
+  if (options?.fallbackClaudexAIConfigToml !== undefined) {
+    files.set(
+      `${MOCK_HOME}/.codex/config.toml.claudexai`,
+      options.fallbackClaudexAIConfigToml,
+    )
+  }
+  if (options?.fallbackClaudexAIAuthJson !== undefined) {
+    files.set(
+      `${MOCK_HOME}/.codex/auth.json.claudexai`,
+      options.fallbackClaudexAIAuthJson,
+    )
   }
 
   vi.resetModules()
@@ -430,6 +464,53 @@ describe('openaiCodexConfig fork contracts', () => {
     expect(configured.resolveOpenAIProviderQueryParams(fallbackAuth)).toEqual({
       source: 'fallback',
     })
+  })
+
+  it('[P0:model] loads named fallback connections in openai then claudexai order', async () => {
+    const configured = await loadCodexConfigModule({
+      authJson: '{"auth_mode":"chatgpt","tokens":{"access_token":"chatgpt-token"}}',
+      fallbackOpenAIConfigToml: [
+        'model_provider = "openai"',
+        'model = "gpt-5.5"',
+        '[model_providers.openai]',
+        'base_url = "https://openai-fallback.example.com/v1"',
+      ].join('\n'),
+      fallbackOpenAIAuthJson:
+        '{"auth_mode":"apikey","OPENAI_API_KEY":" openai-fallback-key "}',
+      fallbackClaudexAIConfigToml: [
+        'model_provider = "claudexai"',
+        'model = "gpt-5.4-mini"',
+        '[model_providers.claudexai]',
+        'base_url = "https://claudexai-fallback.example.com/v1"',
+        'env_key = "CODEX_API_KEY"',
+      ].join('\n'),
+      fallbackClaudexAIAuthJson:
+        '{"auth_mode":"apikey","CODEX_API_KEY":" claudexai-fallback-key "}',
+    })
+
+    const fallbackAuths = configured.getOpenAIFallbackAuthConfigs()
+    expect(fallbackAuths.map(auth => auth.connectionName)).toEqual([
+      'openai',
+      'claudexai',
+    ])
+    expect(fallbackAuths.map(auth => auth.source)).toEqual([
+      '~/.codex/auth.json.openai',
+      '~/.codex/auth.json.claudexai',
+    ])
+    expect(fallbackAuths.map(auth => auth.bearerToken)).toEqual([
+      'openai-fallback-key',
+      'claudexai-fallback-key',
+    ])
+    expect(configured.getOpenAIFallbackAuthConfig()).toMatchObject({
+      connectionName: 'openai',
+      bearerToken: 'openai-fallback-key',
+    })
+    expect(configured.resolveOpenAIBaseUrl(fallbackAuths[0])).toBe(
+      'https://openai-fallback.example.com/v1',
+    )
+    expect(configured.resolveOpenAIBaseUrl(fallbackAuths[1])).toBe(
+      'https://claudexai-fallback.example.com/v1',
+    )
   })
 
   it('[P0:model] lets top-level prompt-cache retention, context window, and reasoning effort override provider-section values', async () => {

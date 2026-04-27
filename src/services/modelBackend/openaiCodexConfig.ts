@@ -44,6 +44,7 @@ export type OpenAIAuthConfig = {
   refreshable: boolean
   providerConfig?: CodexProviderConfig
   isFallback?: boolean
+  connectionName?: string
 }
 
 export type OpenAIReasoningEffort =
@@ -56,8 +57,23 @@ export type OpenAIReasoningEffort =
 
 let cachedProviderConfig: CodexProviderConfig | null | undefined
 let cachedAuthConfig: CodexAuthConfig | null | undefined
-let cachedFallbackProviderConfig: CodexProviderConfig | null | undefined
-let cachedFallbackAuthConfig: CodexAuthConfig | null | undefined
+
+type FallbackConnectionDefinition = {
+  name: string
+  configFilename: string
+  authFilename: string
+}
+
+type FallbackProviderConfigEntry = FallbackConnectionDefinition & {
+  providerConfig: CodexProviderConfig
+}
+
+let cachedFallbackProviderConfigEntries:
+  | FallbackProviderConfigEntry[]
+  | undefined
+let cachedFallbackAuthConfigs:
+  | Record<string, CodexAuthConfig | null>
+  | undefined
 
 const DEFAULT_MODEL = 'gpt-5.5'
 const DEFAULT_BASE_URL = 'https://api.openai.com/v1'
@@ -65,6 +81,23 @@ const DEFAULT_CHATGPT_BASE_URL = 'https://chatgpt.com/backend-api/codex'
 const DEFAULT_ENV_KEY = 'OPENAI_API_KEY'
 const FALLBACK_CONFIG_FILENAME = 'config.fallback.toml'
 const FALLBACK_AUTH_FILENAME = 'auth.fallback.json'
+const FALLBACK_CONNECTIONS: FallbackConnectionDefinition[] = [
+  {
+    name: 'openai',
+    configFilename: 'config.toml.openai',
+    authFilename: 'auth.json.openai',
+  },
+  {
+    name: 'claudexai',
+    configFilename: 'config.toml.claudexai',
+    authFilename: 'auth.json.claudexai',
+  },
+  {
+    name: 'fallback',
+    configFilename: FALLBACK_CONFIG_FILENAME,
+    authFilename: FALLBACK_AUTH_FILENAME,
+  },
+]
 const CHATGPT_REFRESH_TOKEN_URL = 'https://auth.openai.com/oauth/token'
 const CHATGPT_REFRESH_TOKEN_URL_ENV = 'CODEX_REFRESH_TOKEN_URL_OVERRIDE'
 const CODEX_CHATGPT_CLIENT_ID = 'app_EMoamEEZ73f0CkXaXp7hrann'
@@ -77,12 +110,16 @@ function getCodexAuthPath(): string {
   return join(homedir(), '.codex', 'auth.json')
 }
 
-function getCodexFallbackConfigPath(): string {
-  return join(homedir(), '.codex', FALLBACK_CONFIG_FILENAME)
+function getCodexFallbackConfigPath(filename: string): string {
+  return join(homedir(), '.codex', filename)
 }
 
-function getCodexFallbackAuthPath(): string {
-  return join(homedir(), '.codex', FALLBACK_AUTH_FILENAME)
+function getCodexFallbackAuthPath(filename: string): string {
+  return join(homedir(), '.codex', filename)
+}
+
+function getCodexFallbackDisplayPath(filename: string): string {
+  return `~/.codex/${filename}`
 }
 
 function readIfExists(path: string): string | null {
@@ -427,17 +464,31 @@ export function loadCodexProviderConfig(): CodexProviderConfig {
 }
 
 export function loadOpenAIFallbackProviderConfig(): CodexProviderConfig | undefined {
-  if (cachedFallbackProviderConfig) return cachedFallbackProviderConfig
-  if (cachedFallbackProviderConfig === null) return undefined
+  return loadOpenAIFallbackProviderConfigEntries()[0]?.providerConfig
+}
 
-  const raw = readIfExists(getCodexFallbackConfigPath())
-  if (!raw) {
-    cachedFallbackProviderConfig = null
-    return undefined
+function loadOpenAIFallbackProviderConfigEntries(): FallbackProviderConfigEntry[] {
+  if (cachedFallbackProviderConfigEntries) {
+    return cachedFallbackProviderConfigEntries
   }
 
-  cachedFallbackProviderConfig = parseCodexProviderConfig(raw)
-  return cachedFallbackProviderConfig
+  cachedFallbackProviderConfigEntries = FALLBACK_CONNECTIONS.flatMap(
+    connection => {
+      const raw = readIfExists(
+        getCodexFallbackConfigPath(connection.configFilename),
+      )
+      if (!raw) {
+        return []
+      }
+      return [
+        {
+          ...connection,
+          providerConfig: parseCodexProviderConfig(raw),
+        },
+      ]
+    },
+  )
+  return cachedFallbackProviderConfigEntries
 }
 
 export function isOpenAIResponsesBackendEnabled(): boolean {
@@ -498,27 +549,31 @@ export function loadCodexAuthConfig(): CodexAuthConfig {
   return cachedAuthConfig
 }
 
-export function loadOpenAIFallbackAuthConfig(): CodexAuthConfig {
-  if (cachedFallbackAuthConfig) return cachedFallbackAuthConfig
-  if (cachedFallbackAuthConfig === null) return {}
+function loadOpenAIFallbackAuthConfigForEntry(
+  entry: FallbackProviderConfigEntry,
+): CodexAuthConfig {
+  cachedFallbackAuthConfigs ??= {}
+  const cached = cachedFallbackAuthConfigs[entry.name]
+  if (cached) return cached
+  if (cached === null) return {}
 
-  const providerConfig = loadOpenAIFallbackProviderConfig()
-  if (!providerConfig) {
-    cachedFallbackAuthConfig = null
-    return {}
-  }
-
-  const raw = readIfExists(getCodexFallbackAuthPath())
+  const raw = readIfExists(getCodexFallbackAuthPath(entry.authFilename))
   if (!raw) {
-    cachedFallbackAuthConfig = null
+    cachedFallbackAuthConfigs[entry.name] = null
     return {}
   }
 
-  cachedFallbackAuthConfig = parseCodexAuthConfig(
+  const parsed = parseCodexAuthConfig(
     raw,
-    getAuthJsonKeyNamesForProvider(providerConfig),
+    getAuthJsonKeyNamesForProvider(entry.providerConfig),
   )
-  return cachedFallbackAuthConfig
+  cachedFallbackAuthConfigs[entry.name] = parsed
+  return parsed
+}
+
+export function loadOpenAIFallbackAuthConfig(): CodexAuthConfig {
+  const firstEntry = loadOpenAIFallbackProviderConfigEntries()[0]
+  return firstEntry ? loadOpenAIFallbackAuthConfigForEntry(firstEntry) : {}
 }
 
 export function getOpenAIAuthConfig(): OpenAIAuthConfig | undefined {
@@ -568,35 +623,58 @@ export function getOpenAIAuthConfig(): OpenAIAuthConfig | undefined {
 }
 
 export function getOpenAIFallbackAuthConfig(): OpenAIAuthConfig | undefined {
-  const providerConfig = loadOpenAIFallbackProviderConfig()
-  if (!providerConfig) {
-    return undefined
+  return getOpenAIFallbackAuthConfigs()[0]
+}
+
+function getOpenAIFallbackAuthConfigForEntry(
+  entry: FallbackProviderConfigEntry,
+): OpenAIAuthConfig | undefined {
+  const auth = loadOpenAIFallbackAuthConfigForEntry(entry)
+  if (auth.chatgptAccessToken) {
+    return {
+      mode: 'chatgpt',
+      bearerToken: auth.chatgptAccessToken,
+      source: getCodexFallbackDisplayPath(entry.authFilename),
+      accountId: auth.chatgptAccountId,
+      refreshable: Boolean(auth.chatgptRefreshToken),
+      providerConfig: entry.providerConfig,
+      isFallback: true,
+      connectionName: entry.name,
+    }
   }
 
-  const auth = loadOpenAIFallbackAuthConfig()
   if (auth.openaiApiKey) {
     return {
       mode: 'api_key',
       bearerToken: auth.openaiApiKey,
-      source: '~/.codex/auth.fallback.json',
+      source: getCodexFallbackDisplayPath(entry.authFilename),
       refreshable: false,
-      providerConfig,
+      providerConfig: entry.providerConfig,
       isFallback: true,
+      connectionName: entry.name,
     }
   }
 
-  if (providerConfig.experimentalBearerToken?.trim()) {
+  if (entry.providerConfig.experimentalBearerToken?.trim()) {
     return {
       mode: 'api_key',
-      bearerToken: providerConfig.experimentalBearerToken.trim(),
-      source: '~/.codex/config.fallback.toml',
+      bearerToken: entry.providerConfig.experimentalBearerToken.trim(),
+      source: getCodexFallbackDisplayPath(entry.configFilename),
       refreshable: false,
-      providerConfig,
+      providerConfig: entry.providerConfig,
       isFallback: true,
+      connectionName: entry.name,
     }
   }
 
   return undefined
+}
+
+export function getOpenAIFallbackAuthConfigs(): OpenAIAuthConfig[] {
+  return loadOpenAIFallbackProviderConfigEntries().flatMap(entry => {
+    const authConfig = getOpenAIFallbackAuthConfigForEntry(entry)
+    return authConfig ? [authConfig] : []
+  })
 }
 
 export function getOpenAIApiKey(): string | undefined {
@@ -630,10 +708,9 @@ export function resolveOpenAIBaseUrl(authConfig?: OpenAIAuthConfig): string {
   const provider = getProviderConfigForAuth(authConfig)
   const envBaseUrl = process.env.OPENAI_BASE_URL
   if (
-    !authConfig?.isFallback &&
     !envBaseUrl &&
     !provider.baseUrlExplicit &&
-    resolveOpenAIAuthMode() === 'chatgpt'
+    (authConfig?.mode ?? resolveOpenAIAuthMode()) === 'chatgpt'
   ) {
     return DEFAULT_CHATGPT_BASE_URL
   }

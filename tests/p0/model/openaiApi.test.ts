@@ -1,5 +1,20 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
+type FallbackAuthConfigOption = {
+  mode: 'api_key' | 'chatgpt'
+  bearerToken: string
+  source: string
+  accountId?: string
+  refreshable: boolean
+  isFallback?: boolean
+  providerConfig?: {
+    baseUrl: string
+    model?: string
+    queryParams?: Record<string, string>
+    httpHeaders?: Record<string, string>
+  }
+}
+
 type LoadOptions = {
   apiKey?: string
   authConfig?: {
@@ -16,20 +31,8 @@ type LoadOptions = {
     accountId?: string
     refreshable: boolean
   }
-  fallbackAuthConfig?: {
-    mode: 'api_key' | 'chatgpt'
-    bearerToken: string
-    source: string
-    accountId?: string
-    refreshable: boolean
-    isFallback?: boolean
-    providerConfig?: {
-      baseUrl: string
-      model?: string
-      queryParams?: Record<string, string>
-      httpHeaders?: Record<string, string>
-    }
-  }
+  fallbackAuthConfig?: FallbackAuthConfigOption
+  fallbackAuthConfigs?: FallbackAuthConfigOption[]
   baseUrl?: string
   providerHeaders?: Record<string, string> | undefined
   providerQueryParams?: Record<string, string> | undefined
@@ -44,7 +47,9 @@ async function loadOpenAIApiModule(options: LoadOptions = {}) {
 
   vi.doMock('../../../src/services/modelBackend/openaiCodexConfig.js', () => ({
     describeOpenAIApiKeySources: () => 'OPENAI_API_KEY or ~/.codex/auth.json',
-    getOpenAIFallbackAuthConfig: () => options.fallbackAuthConfig,
+    getOpenAIFallbackAuthConfigs: () =>
+      options.fallbackAuthConfigs ??
+      (options.fallbackAuthConfig ? [options.fallbackAuthConfig] : []),
     getOpenAIAuthConfig: () =>
       options.authConfig ??
       (options.apiKey
@@ -494,5 +499,75 @@ describe('openaiApi fork contracts', () => {
     expect(fallbackHeaders.get('chatgpt-account-id')).toBeNull()
     expect(fallbackHeaders.get('x-fallback')).toBe('1')
     expect(fallbackInit?.body).toBe('{"model":"fallback-model","ok":true}')
+  })
+
+  it('[P0:model] tries the second named fallback when the first fallback is exhausted', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response('{"error":{"message":"primary rate limit"}}', {
+          status: 429,
+        }),
+      )
+      .mockResolvedValueOnce(
+        new Response('{"error":{"message":"fallback quota"}}', {
+          status: 429,
+        }),
+      )
+      .mockResolvedValueOnce(new Response('{"ok":true}', { status: 200 }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    const api = await loadOpenAIApiModule({
+      baseUrl: 'https://primary.example.com/v1',
+      authConfig: {
+        mode: 'api_key',
+        bearerToken: 'primary-key',
+        source: '~/.codex/auth.json',
+        refreshable: false,
+      },
+      fallbackAuthConfigs: [
+        {
+          mode: 'api_key',
+          bearerToken: 'openai-fallback-key',
+          source: '~/.codex/auth.json.openai',
+          refreshable: false,
+          isFallback: true,
+          providerConfig: {
+            baseUrl: 'https://openai-fallback.example.com/v1',
+            model: 'openai-fallback-model',
+          },
+        },
+        {
+          mode: 'api_key',
+          bearerToken: 'claudexai-fallback-key',
+          source: '~/.codex/auth.json.claudexai',
+          refreshable: false,
+          isFallback: true,
+          providerConfig: {
+            baseUrl: 'https://claudexai-fallback.example.com/v1',
+            model: 'claudexai-fallback-model',
+          },
+        },
+      ],
+    })
+
+    await api.fetchOpenAIResponse('/responses', {
+      method: 'POST',
+      body: { model: 'primary-model', ok: true },
+    })
+
+    expect(fetchMock).toHaveBeenCalledTimes(3)
+    expect(fetchMock.mock.calls[1]![0]).toBe(
+      'https://openai-fallback.example.com/v1/responses',
+    )
+    expect(fetchMock.mock.calls[1]![1]?.body).toBe(
+      '{"model":"openai-fallback-model","ok":true}',
+    )
+    expect(fetchMock.mock.calls[2]![0]).toBe(
+      'https://claudexai-fallback.example.com/v1/responses',
+    )
+    expect(fetchMock.mock.calls[2]![1]?.body).toBe(
+      '{"model":"claudexai-fallback-model","ok":true}',
+    )
   })
 })

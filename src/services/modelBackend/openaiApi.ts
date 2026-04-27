@@ -1,7 +1,7 @@
 import { getIsNonInteractiveSession } from '../../bootstrap/state.js'
 import { jsonStringify } from '../../utils/slowOperations.js'
 import {
-  getOpenAIFallbackAuthConfig,
+  getOpenAIFallbackAuthConfigs,
   getMissingOpenAIApiKeyMessage,
   getOpenAIAuthConfig,
   refreshOpenAIChatGPTAuthToken,
@@ -86,6 +86,41 @@ function shouldFallbackFromChatGPT(
   )
 }
 
+function shouldFallbackFromOpenAIError(
+  authConfig: OpenAIAuthConfig,
+  status: number,
+  payloadText: string,
+): boolean {
+  if (shouldFallbackFromChatGPT(authConfig, status, payloadText)) {
+    return true
+  }
+
+  const normalized = payloadText.toLowerCase()
+  return (
+    status === 401 ||
+    status === 403 ||
+    status === 408 ||
+    status === 409 ||
+    status === 425 ||
+    status === 429 ||
+    status >= 500 ||
+    normalized.includes('usage limit') ||
+    normalized.includes('quota') ||
+    normalized.includes('credit limit') ||
+    normalized.includes('out of credits') ||
+    normalized.includes('rate limit') ||
+    normalized.includes('too many requests')
+  )
+}
+
+function isAbortError(error: unknown): boolean {
+  return (
+    error instanceof DOMException && error.name === 'AbortError'
+  ) || (
+    error instanceof Error && error.name === 'AbortError'
+  )
+}
+
 function applyFallbackModel(body: unknown, authConfig: OpenAIAuthConfig): unknown {
   const fallbackModel = authConfig.providerConfig?.model
   if (!authConfig.isFallback || !fallbackModel) {
@@ -139,6 +174,16 @@ function getChatGPTFallbackCooldownMs(): number {
   return Number.isFinite(parsed) && parsed >= 0
     ? parsed
     : DEFAULT_CHATGPT_FALLBACK_COOLDOWN_MS
+}
+
+function getFallbackAuthConfigsExcluding(
+  currentAuth: OpenAIAuthConfig,
+): OpenAIAuthConfig[] {
+  return getOpenAIFallbackAuthConfigs().filter(
+    auth =>
+      auth.source !== currentAuth.source ||
+      auth.bearerToken !== currentAuth.bearerToken,
+  )
 }
 
 function appendProviderQueryParams(url: URL, authConfig?: OpenAIAuthConfig): URL {
@@ -264,7 +309,7 @@ export async function fetchOpenAIResponse(
     authConfig?.mode === 'chatgpt' &&
     Date.now() < chatGPTFallbackUntilMs
   ) {
-    authConfig = getOpenAIFallbackAuthConfig() ?? authConfig
+    authConfig = getOpenAIFallbackAuthConfigs()[0] ?? authConfig
   }
   if (!authConfig) {
     throw new Error(getMissingOpenAIApiKeyMessage())
@@ -295,7 +340,90 @@ export async function fetchOpenAIResponse(
       signal,
     })
 
-  let response = await send(authConfig)
+  const tryFallbacks = async (
+    failedAuthConfig: OpenAIAuthConfig,
+    failedHeaders?: Headers,
+  ): Promise<Response | undefined> => {
+    const fallbackAuthConfigs = getFallbackAuthConfigsExcluding(failedAuthConfig)
+    if (fallbackAuthConfigs.length === 0) {
+      return undefined
+    }
+
+    if (failedAuthConfig.mode === 'chatgpt') {
+      chatGPTFallbackUntilMs =
+        Date.now() +
+        Math.max(
+          failedHeaders
+            ? (parseRetryAfterMs(failedHeaders) ?? 0)
+            : 0,
+          getChatGPTFallbackCooldownMs(),
+        )
+    }
+
+    let lastHttpError:
+      | {
+          status: number
+          bodyText: string
+          headers: Headers
+        }
+      | undefined
+    let lastNetworkError: unknown
+
+    for (const fallbackAuth of fallbackAuthConfigs) {
+      let fallbackResponse: Response
+      try {
+        fallbackResponse = await send(fallbackAuth)
+      } catch (error) {
+        if (isAbortError(error)) {
+          throw error
+        }
+        lastNetworkError = error
+        continue
+      }
+
+      if (fallbackResponse.ok) {
+        return fallbackResponse
+      }
+
+      const fallbackPayloadText = await fallbackResponse.text()
+      lastHttpError = {
+        status: fallbackResponse.status,
+        bodyText: fallbackPayloadText,
+        headers: new Headers(fallbackResponse.headers),
+      }
+      if (
+        !shouldFallbackFromOpenAIError(
+          fallbackAuth,
+          fallbackResponse.status,
+          fallbackPayloadText,
+        )
+      ) {
+        break
+      }
+    }
+
+    if (lastHttpError) {
+      throw new OpenAIHTTPError(lastHttpError)
+    }
+    if (lastNetworkError) {
+      throw lastNetworkError
+    }
+    return undefined
+  }
+
+  let response: Response
+  try {
+    response = await send(authConfig)
+  } catch (error) {
+    if (isAbortError(error)) {
+      throw error
+    }
+    const fallbackResponse = await tryFallbacks(authConfig)
+    if (fallbackResponse) {
+      return fallbackResponse
+    }
+    throw error
+  }
   if (response.status === 401 && authConfig.mode === 'chatgpt') {
     const refreshedAuth = await refreshOpenAIChatGPTAuthToken()
     if (refreshedAuth) {
@@ -306,25 +434,13 @@ export async function fetchOpenAIResponse(
 
   if (!response.ok) {
     const payloadText = await response.text()
-    if (shouldFallbackFromChatGPT(authConfig, response.status, payloadText)) {
-      const fallbackAuth = getOpenAIFallbackAuthConfig()
-      if (fallbackAuth) {
-        chatGPTFallbackUntilMs =
-          Date.now() +
-          Math.max(
-            parseRetryAfterMs(new Headers(response.headers)) ?? 0,
-            getChatGPTFallbackCooldownMs(),
-          )
-        response = await send(fallbackAuth)
-        if (response.ok) {
-          return response
-        }
-        const fallbackPayloadText = await response.text()
-        throw new OpenAIHTTPError({
-          status: response.status,
-          bodyText: fallbackPayloadText,
-          headers: new Headers(response.headers),
-        })
+    if (shouldFallbackFromOpenAIError(authConfig, response.status, payloadText)) {
+      const fallbackResponse = await tryFallbacks(
+        authConfig,
+        new Headers(response.headers),
+      )
+      if (fallbackResponse) {
+        return fallbackResponse
       }
     }
     throw new OpenAIHTTPError({

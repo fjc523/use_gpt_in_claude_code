@@ -4,6 +4,7 @@ import { BRAND_NAME } from '../../constants/brand.js'
 import {
   describeOpenAIApiKeySources,
   getOpenAIFallbackAuthConfig,
+  getOpenAIFallbackAuthConfigs,
   getOpenAIAuthConfig,
   getOpenAIApiKey,
   getMissingOpenAIApiKeyMessage,
@@ -88,6 +89,7 @@ function getStatusPayload() {
   const provider = loadCodexProviderConfig()
   const apiKeySource = getApiKeySource()
   const fallbackAuth = getOpenAIFallbackAuthConfig()
+  const fallbackAuths = getOpenAIFallbackAuthConfigs()
 
   return {
     loggedIn: apiKeySource !== 'none',
@@ -105,6 +107,12 @@ function getStatusPayload() {
     fallbackApiKeySource: fallbackAuth?.source ?? null,
     fallbackBaseUrl: fallbackAuth ? resolveOpenAIBaseUrl(fallbackAuth) : null,
     fallbackModel: fallbackAuth?.providerConfig?.model ?? null,
+    fallbacks: fallbackAuths.map(auth => ({
+      name: auth.connectionName ?? 'fallback',
+      apiKeySource: auth.source,
+      baseUrl: resolveOpenAIBaseUrl(auth),
+      model: auth.providerConfig?.model ?? null,
+    })),
   }
 }
 
@@ -154,6 +162,11 @@ export async function authStatus(opts: {
     process.stdout.write(
       `Fallback credentials: ${status.fallbackApiKeySource ?? 'not configured'}\n`,
     )
+    for (const [index, fallback] of status.fallbacks.entries()) {
+      process.stdout.write(
+        `Fallback ${index + 1}: ${fallback.name} (${fallback.apiKeySource}, ${fallback.baseUrl}, ${fallback.model ?? 'configured model'})\n`,
+      )
+    }
     if (status.fallbackBaseUrl) {
       process.stdout.write(`Fallback Base URL: ${status.fallbackBaseUrl}\n`)
     }

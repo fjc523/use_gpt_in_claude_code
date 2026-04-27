@@ -29,12 +29,18 @@ npm upgrade -g @zju_han/claudex-cli
 
 ChatGPT 登录态会自动切到 Codex ChatGPT 后端，并在访问令牌过期后尝试用 refresh token 刷新一次。也就是说，已经通过 `codex login` 登录 ChatGPT 的机器通常不需要额外配置 `OPENAI_API_KEY`。
 
-如果希望 ChatGPT 额度耗尽后自动切到 API fallback，可以固定配置：
+如果希望主连接额度耗尽或连接异常后自动切到 API fallback，可以固定配置多路备连接。`claudex` 默认按下面顺序尝试：
+
+1. 主连接：当前 Codex 配置，`~/.codex/config.toml` + `~/.codex/auth.json`
+2. 第一备连接 openai：`~/.codex/config.toml.openai` + `~/.codex/auth.json.openai`
+3. 第二备连接 claudexai：`~/.codex/config.toml.claudexai` + `~/.codex/auth.json.claudexai`
+
+兼容旧配置：
 
 - `~/.codex/config.fallback.toml`：fallback API provider / model / base_url 配置
 - `~/.codex/auth.fallback.json`：fallback API key，格式为 `{"auth_mode":"apikey","CODEX_API_KEY":"..."}` 或 `{"auth_mode":"apikey","OPENAI_API_KEY":"..."}`
 
-运行时默认优先使用 ChatGPT 登录态；当 ChatGPT 返回 quota / usage limit / rate limit / credits exhausted 等错误时，会自动改用 fallback API 配置。fallback 有短期 cooldown，默认 30 分钟，可以用 `CLAUDEX_CHATGPT_FALLBACK_COOLDOWN_MS` 调整。
+运行时默认优先使用当前 Codex 连接；当主连接或前序备连接返回 quota / usage limit / rate limit / credits exhausted / 临时网络错误等可切换错误时，会自动切到下一路备连接。ChatGPT 登录态触发 fallback 后有短期 cooldown，默认 30 分钟，可以用 `CLAUDEX_CHATGPT_FALLBACK_COOLDOWN_MS` 调整。
 
 可以用下面命令检查当前实际生效的认证方式：
 
