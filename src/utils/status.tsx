@@ -2,7 +2,8 @@ import chalk from 'chalk';
 import figures from 'figures';
 import * as React from 'react';
 import { color, Text } from '../ink.js';
-import { getOpenAIAuthConfig, loadCodexProviderConfig, resolveOpenAIBaseUrl, resolveOpenAIModel, isOpenAIResponsesBackendEnabled } from '../services/modelBackend/openaiCodexConfig.js';
+import { getOpenAIFallbackAuthConfigs, getOpenAIAuthConfig, loadCodexProviderConfig, resolveOpenAIBaseUrl, resolveOpenAIModel, isOpenAIResponsesBackendEnabled, type OpenAIAuthConfig } from '../services/modelBackend/openaiCodexConfig.js';
+import { getOpenAIActiveConnectionSnapshot } from '../services/modelBackend/openaiApi.js';
 import type { MCPServerConnection } from '../services/mcp/types.js';
 import { getAccountInformation, isClaudeAISubscriber } from './auth.js';
 import { getLargeMemoryFiles, getMemoryFiles, MAX_MEMORY_CHARACTER_COUNT } from './claudemd.js';
@@ -258,13 +259,41 @@ export function buildAccountProperties(): Property[] {
 export function buildAPIProviderProperties(): Property[] {
   if (isOpenAIResponsesBackendEnabled()) {
     const provider = loadCodexProviderConfig()
+    const activeConnection = getOpenAIActiveConnectionSnapshot()
+    const fallbackAuths = getOpenAIFallbackAuthConfigs()
     const modelId = resolveOpenAIModel(undefined)
     const modelLabel = renderModelName(modelId)
+    const fallbackOrder = fallbackAuths.map((auth, index) =>
+      `${index + 1}. ${formatOpenAIConnectionAuth(auth)}`,
+    )
     return [
       {
         label: 'API provider',
         value: `OpenAI/Codex Responses (${provider.providerId})`,
       },
+      {
+        label: 'Current source',
+        value: activeConnection
+          ? `${activeConnection.role === 'primary' ? 'primary' : 'fallback'} ${activeConnection.name} · ${activeConnection.baseUrl} · ${activeConnection.credentialSource}${activeConnection.lastUsedAt ? ` · last used ${activeConnection.lastUsedAt}` : ''}`
+          : 'not configured',
+      },
+      {
+        label: 'Primary source',
+        value: `${provider.providerId} · ${resolveOpenAIBaseUrl()} · ${getOpenAIAuthConfig()?.source ?? 'not configured'}`,
+      },
+      ...(fallbackOrder.length > 0
+        ? [
+            {
+              label: 'Fallback order',
+              value: fallbackOrder,
+            },
+          ]
+        : [
+            {
+              label: 'Fallback order',
+              value: 'not configured',
+            },
+          ]),
       {
         label: 'Base URL',
         value: resolveOpenAIBaseUrl(),
@@ -392,6 +421,14 @@ export function buildAPIProviderProperties(): Property[] {
     }
   }
   return properties;
+}
+
+function formatOpenAIConnectionAuth(auth: OpenAIAuthConfig): string {
+  const provider = auth.providerConfig
+  const name = auth.connectionName ?? provider?.providerId ?? 'fallback'
+  const baseUrl = resolveOpenAIBaseUrl(auth)
+  const model = provider?.model ? ` · ${provider.model}` : ''
+  return `${name} · ${baseUrl}${model} · ${auth.source}`
 }
 export function getModelDisplayLabel(mainLoopModel: string | null): string {
   if (isOpenAIResponsesBackendEnabled()) {

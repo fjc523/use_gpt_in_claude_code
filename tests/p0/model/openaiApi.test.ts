@@ -7,7 +7,9 @@ type FallbackAuthConfigOption = {
   accountId?: string
   refreshable: boolean
   isFallback?: boolean
+  connectionName?: string
   providerConfig?: {
+    providerId?: string
     baseUrl: string
     model?: string
     queryParams?: Record<string, string>
@@ -63,11 +65,16 @@ async function loadOpenAIApiModule(options: LoadOptions = {}) {
     getOpenAIApiKey: () => options.apiKey,
     getMissingOpenAIApiKeyMessage: () =>
       'No OpenAI/Codex API key is configured. Expected OPENAI_API_KEY or ~/.codex/auth.json.',
+    loadCodexProviderConfig: () => ({
+      providerId: 'openai',
+      model: 'primary-model',
+    }),
     refreshOpenAIChatGPTAuthToken: async () => options.refreshedAuthConfig,
     resolveOpenAIBaseUrl: (authConfig?: LoadOptions['fallbackAuthConfig']) =>
       authConfig?.providerConfig?.baseUrl ??
       options.baseUrl ??
       'https://api.example.com/v1',
+    resolveOpenAIModel: () => 'primary-model',
     resolveOpenAIProviderHeaders: (authConfig?: LoadOptions['fallbackAuthConfig']) =>
       authConfig?.providerConfig?.httpHeaders ?? options.providerHeaders,
     resolveOpenAIProviderQueryParams: (authConfig?: LoadOptions['fallbackAuthConfig']) =>
@@ -532,7 +539,9 @@ describe('openaiApi fork contracts', () => {
           source: '~/.codex/auth.json.openai',
           refreshable: false,
           isFallback: true,
+          connectionName: 'openai',
           providerConfig: {
+            providerId: 'openai',
             baseUrl: 'https://openai-fallback.example.com/v1',
             model: 'openai-fallback-model',
           },
@@ -543,7 +552,9 @@ describe('openaiApi fork contracts', () => {
           source: '~/.codex/auth.json.claudexai',
           refreshable: false,
           isFallback: true,
+          connectionName: 'claudexai',
           providerConfig: {
+            providerId: 'claudexai',
             baseUrl: 'https://claudexai-fallback.example.com/v1',
             model: 'claudexai-fallback-model',
           },
@@ -556,6 +567,13 @@ describe('openaiApi fork contracts', () => {
       body: { model: 'primary-model', ok: true },
     })
 
+    expect(api.getOpenAIActiveConnectionSnapshot()).toMatchObject({
+      role: 'fallback',
+      name: 'claudexai',
+      baseUrl: 'https://claudexai-fallback.example.com/v1',
+      model: 'claudexai-fallback-model',
+      credentialSource: '~/.codex/auth.json.claudexai',
+    })
     expect(fetchMock).toHaveBeenCalledTimes(3)
     expect(fetchMock.mock.calls[1]![0]).toBe(
       'https://openai-fallback.example.com/v1/responses',

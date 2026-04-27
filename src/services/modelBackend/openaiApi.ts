@@ -4,8 +4,10 @@ import {
   getOpenAIFallbackAuthConfigs,
   getMissingOpenAIApiKeyMessage,
   getOpenAIAuthConfig,
+  loadCodexProviderConfig,
   refreshOpenAIChatGPTAuthToken,
   resolveOpenAIBaseUrl,
+  resolveOpenAIModel,
   resolveOpenAIProviderHeaders,
   resolveOpenAIProviderQueryParams,
   shouldUseOpenAIOfficialClientHeaders,
@@ -169,6 +171,20 @@ const FALLBACK_COOLDOWN_ENV = 'CLAUDEX_CHATGPT_FALLBACK_COOLDOWN_MS'
 
 let chatGPTFallbackUntilMs = 0
 
+export type OpenAIConnectionSnapshot = {
+  role: 'primary' | 'fallback'
+  name: string
+  providerId: string
+  baseUrl: string
+  model: string
+  credentialSource: string
+  authMode: OpenAIAuthConfig['mode']
+  lastUsedAt?: string
+}
+
+let lastSuccessfulOpenAIAuthConfig: OpenAIAuthConfig | undefined
+let lastSuccessfulOpenAIAuthUsedAt: string | undefined
+
 function getChatGPTFallbackCooldownMs(): number {
   const parsed = Number.parseInt(process.env[FALLBACK_COOLDOWN_ENV] ?? '', 10)
   return Number.isFinite(parsed) && parsed >= 0
@@ -184,6 +200,67 @@ function getFallbackAuthConfigsExcluding(
       auth.source !== currentAuth.source ||
       auth.bearerToken !== currentAuth.bearerToken,
   )
+}
+
+function getProviderIdForAuth(authConfig: OpenAIAuthConfig): string {
+  return authConfig.providerConfig?.providerId ?? loadCodexProviderConfig().providerId
+}
+
+function getModelForAuth(authConfig: OpenAIAuthConfig): string {
+  return authConfig.providerConfig?.model ?? resolveOpenAIModel(undefined)
+}
+
+function getConnectionNameForAuth(authConfig: OpenAIAuthConfig): string {
+  if (authConfig.isFallback) {
+    return authConfig.connectionName ?? getProviderIdForAuth(authConfig)
+  }
+  return getProviderIdForAuth(authConfig)
+}
+
+function buildOpenAIConnectionSnapshot(
+  authConfig: OpenAIAuthConfig,
+  lastUsedAt?: string,
+): OpenAIConnectionSnapshot {
+  return {
+    role: authConfig.isFallback ? 'fallback' : 'primary',
+    name: getConnectionNameForAuth(authConfig),
+    providerId: getProviderIdForAuth(authConfig),
+    baseUrl: resolveOpenAIBaseUrl(authConfig),
+    model: getModelForAuth(authConfig),
+    credentialSource: authConfig.source,
+    authMode: authConfig.mode,
+    lastUsedAt,
+  }
+}
+
+function markOpenAIConnectionUsed(authConfig: OpenAIAuthConfig): void {
+  lastSuccessfulOpenAIAuthConfig = authConfig
+  lastSuccessfulOpenAIAuthUsedAt = new Date().toISOString()
+}
+
+export function getOpenAIActiveConnectionSnapshot():
+  | OpenAIConnectionSnapshot
+  | undefined {
+  if (lastSuccessfulOpenAIAuthConfig) {
+    return buildOpenAIConnectionSnapshot(
+      lastSuccessfulOpenAIAuthConfig,
+      lastSuccessfulOpenAIAuthUsedAt,
+    )
+  }
+
+  const authConfig = getOpenAIAuthConfig()
+  if (!authConfig) {
+    return undefined
+  }
+
+  if (authConfig.mode === 'chatgpt' && Date.now() < chatGPTFallbackUntilMs) {
+    const fallbackAuth = getOpenAIFallbackAuthConfigs()[0]
+    if (fallbackAuth) {
+      return buildOpenAIConnectionSnapshot(fallbackAuth)
+    }
+  }
+
+  return buildOpenAIConnectionSnapshot(authConfig)
 }
 
 function appendProviderQueryParams(url: URL, authConfig?: OpenAIAuthConfig): URL {
@@ -382,6 +459,7 @@ export async function fetchOpenAIResponse(
       }
 
       if (fallbackResponse.ok) {
+        markOpenAIConnectionUsed(fallbackAuth)
         return fallbackResponse
       }
 
@@ -450,6 +528,7 @@ export async function fetchOpenAIResponse(
     })
   }
 
+  markOpenAIConnectionUsed(authConfig)
   return response
 }
 
