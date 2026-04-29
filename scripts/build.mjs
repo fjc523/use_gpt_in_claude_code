@@ -15,6 +15,7 @@ const packageJson = JSON.parse(readFileSync(join(rootDir, 'package.json'), 'utf8
 const outputDirName = process.env.CLAUDE_CODE_BUILD_OUTDIR || 'dist'
 const outputUserType = process.env.CLAUDE_CODE_BUILD_USER_TYPE?.trim() || null
 const promptVariant = process.env.CLAUDE_CODE_PROMPT_VARIANT?.trim() || null
+const cliFlavor = process.env.CLAUDE_CODE_CLI_FLAVOR?.trim() || null
 const distDir = join(rootDir, outputDirName)
 const outFile = join(distDir, 'cli.js')
 const vendorDir = join(rootDir, 'vendor')
@@ -46,6 +47,7 @@ const defines = {
   ...(promptVariant
     ? { 'process.env.CLAUDE_CODE_PROMPT_VARIANT': promptVariant }
     : {}),
+  ...(cliFlavor ? { 'process.env.CLAUDE_CODE_CLI_FLAVOR': cliFlavor } : {}),
 }
 
 const externals = [

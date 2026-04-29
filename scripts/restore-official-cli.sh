@@ -2,14 +2,15 @@
 set -euo pipefail
 
 TARGET_DIR="/opt/homebrew/bin"
-ACTIVE_LINK="$TARGET_DIR/claude"
-BACKUP_LINK="$TARGET_DIR/claude-official"
+REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+CLAUDEX_PATH="$REPO_DIR/cli-ant.js"
 
-if [[ ! -L "$BACKUP_LINK" ]]; then
-  echo "No claude-official backup link exists." >&2
-  exit 1
-fi
+for name in claudex claudex-local claude-codex; do
+  link="$TARGET_DIR/$name"
+  if [[ -L "$link" && "$(readlink "$link")" == "$CLAUDEX_PATH" ]]; then
+    rm "$link"
+    echo "Removed $link"
+  fi
+done
 
-ln -snf "$(readlink "$BACKUP_LINK")" "$ACTIVE_LINK"
-
-echo "Restored claude launcher -> $(readlink "$ACTIVE_LINK")"
+echo "Official claude launcher was not modified by this repo."
