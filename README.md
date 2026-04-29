@@ -4,12 +4,21 @@
 
 它尽量保留原有终端交互、工具审批和本地执行模型，但默认把模型后端切到 **OpenAI / Codex 兼容的 Responses API**。
 
+`claudex` 与官方 `claude` 默认隔离：`claudex` 的会话、settings、debug、插件缓存等运行态写入 `~/.claudex`，模型和认证读取 `~/.codex`；官方 `claude` 继续使用 `~/.claude` 和 Anthropic API 配置。
+
 ## 1. 安装及升级命令
 
 ### 安装
 
 ```bash
 npm install -g @zju_han/claudex-cli
+```
+
+从当前仓库本地安装时也只会注册 `claudex` 命令，不会覆盖官方 `claude`：
+
+```bash
+npm run build:claudex
+npm install -g .
 ```
 
 ### 升级
@@ -26,6 +35,8 @@ npm upgrade -g @zju_han/claudex-cli
 
 1. 环境变量 API key：优先读取 `OPENAI_API_KEY`；如果 `~/.codex/config.toml` 的 provider 配置了 `env_key`，则先读该环境变量，再 fallback 到 `OPENAI_API_KEY`。
 2. Codex 本地认证文件：读取 `~/.codex/auth.json`。`auth_mode = "apikey"` 时使用文件内 API key；`auth_mode = "chatgpt"` 时复用 `codex login` 的 ChatGPT 登录态。
+
+注意：`claudex` 不读取全局 `~/.claude/settings.json` 作为自身配置。需要给 `claudex` 单独配置 hooks、MCP、权限或 Telegram 时，请写入 `~/.claudex/settings.json`；如果要改这个位置，可设置 `CLAUDEX_CONFIG_DIR=/path/to/claudex-state`。
 
 ChatGPT 登录态会自动切到 Codex ChatGPT 后端，并在访问令牌过期后尝试用 refresh token 刷新一次。也就是说，已经通过 `codex login` 登录 ChatGPT 的机器通常不需要额外配置 `OPENAI_API_KEY`。
 
@@ -140,9 +151,11 @@ npm run activate-cli
 
 激活后命令对应关系为：
 
-- `claudex-local` -> 当前默认构建（`cli.js` -> `dist/cli.js`，版本显示 `2.1.88`）
-- `claude-codex` -> 当前默认构建（`cli.js` -> `dist/cli.js`，版本显示 `2.1.88`）
-- `claudex` -> ant 变体构建（`cli-ant.js` -> `dist-ant/cli.js`，版本显示当前仓库版本）
+- `claudex-local` -> `cli-ant.js` -> `dist-ant/cli.js`
+- `claude-codex` -> 兼容旧用法，也指向 `cli-ant.js`
+- `claudex` -> `cli-ant.js` -> `dist-ant/cli.js`
+
+该脚本不会创建或覆盖 `/opt/homebrew/bin/claude`。
 
 恢复官方链接：
 

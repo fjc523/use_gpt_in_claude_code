@@ -19,8 +19,8 @@ This file provides guidance to Claude Code when working with code in this reposi
 - Build the CLI bundle: `npm run build`
 - Remove build output: `npm run clean`
 - Start the built CLI: `npm start`
-- Show CLI help through the source launcher: `node cli.js --help`
-- Quick auth check: `node cli.js auth status --text`
+- Show CLI help through the ClaudeX launcher: `node cli-ant.js --help`
+- Quick auth check: `node cli-ant.js auth status --text`
 - Smoke test the fork end-to-end: `npm run smoke`
 - Run the P0 regression suite: `npm run test:p0`
 - Run the P0 suite with dot reporter: `npm run test:p0:check`
@@ -33,6 +33,7 @@ This file provides guidance to Claude Code when working with code in this reposi
 - The default model backend in this fork is OpenAI Responses, not Anthropic.
 - Credentials are loaded from `OPENAI_API_KEY` or `~/.codex/auth.json`.
 - Provider/model defaults are loaded from `~/.codex/config.toml`.
+- ClaudeX runtime state is isolated from official Claude Code: `claudex` uses `~/.claudex` via `CLAUDE_CONFIG_DIR`, while official `claude` remains on `~/.claude`.
 - `src/services/modelBackend/openaiCodexConfig.ts` is the canonical place for config precedence: API key, base URL, model, prompt-cache retention, context window, and reasoning effort.
 - `OPENAI_MODEL`, `OPENAI_REASONING_EFFORT`, `OPENAI_BASE_URL`, and related env vars override `~/.codex/config.toml`.
 

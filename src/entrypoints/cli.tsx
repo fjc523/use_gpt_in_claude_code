@@ -1,4 +1,7 @@
 import { feature } from 'bun:bundle';
+import { applyClaudexRuntimeIsolation } from './claudexIsolation.js';
+
+applyClaudexRuntimeIsolation();
 
 // Bugfix for corepack auto-pinning, which adds yarnpkg to peoples' package.jsons
 // eslint-disable-next-line custom-rules/no-top-level-side-effects

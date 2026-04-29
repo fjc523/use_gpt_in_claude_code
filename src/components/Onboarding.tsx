@@ -17,12 +17,12 @@ import { ApproveApiKey } from './ApproveApiKey.js';
 import { ConsoleOAuthFlow } from './ConsoleOAuthFlow.js';
 import { Select } from './CustomSelect/select.js';
 import { WelcomeV2 } from './LogoV2/WelcomeV2.js';
+import { shouldEnterContinueOnboardingStep, type OnboardingStepId } from './onboardingSteps.js';
 import { PressEnterToContinue } from './PressEnterToContinue.js';
 import { ThemePicker } from './ThemePicker.js';
 import { OrderedList } from './ui/OrderedList.js';
-type StepId = 'preflight' | 'theme' | 'oauth' | 'api-key' | 'openai-auth' | 'security' | 'terminal-setup';
 interface OnboardingStep {
-  id: StepId;
+  id: OnboardingStepId;
   component: React.ReactNode;
 }
 type Props = {
@@ -108,7 +108,7 @@ export function Onboarding({
             No OpenAI/Codex credentials were detected. Set <Text bold>{describeOpenAIApiKeySources()}</Text> or sign in with Codex before sending prompts.
           </Text>}
         <Text dimColor>
-          Use <Text bold>/login</Text> or <Text bold>claude auth status</Text> to inspect the active credential source.
+          Use <Text bold>/login</Text> or <Text bold>claudex auth status</Text> to inspect the active credential source.
         </Text>
       </Box>
       <PressEnterToContinue />
@@ -206,9 +206,9 @@ export function Onboarding({
   }
   const currentStep = steps[currentStepIndex];
 
-  // Handle Enter on security step and Escape on terminal-setup step
+  // Handle Enter on static continue steps and Escape on terminal-setup step.
   // Dependencies match what goToNextStep uses internally
-  const handleSecurityContinue = useCallback(() => {
+  const handleEnterContinue = useCallback(() => {
     if (currentStepIndex === steps.length - 1) {
       onDone();
     } else {
@@ -219,10 +219,10 @@ export function Onboarding({
     goToNextStep();
   }, [currentStepIndex, steps.length, oauthEnabled, onDone]);
   useKeybindings({
-    'confirm:yes': handleSecurityContinue
+    'confirm:yes': handleEnterContinue
   }, {
     context: 'Confirmation',
-    isActive: currentStep?.id === 'security'
+    isActive: shouldEnterContinueOnboardingStep(currentStep?.id)
   });
   useKeybindings({
     'confirm:no': handleTerminalSetupSkip

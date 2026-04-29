@@ -62,7 +62,20 @@ writeFileSync(
 
 writeFileSync(
   join(outDir, 'cli.js'),
-  "#!/usr/bin/env node\n\nimport './dist-ant/cli.js'\n",
+  `#!/usr/bin/env node
+
+import { homedir } from 'node:os'
+import { join } from 'node:path'
+
+process.env.CLAUDEX_CLI = '1'
+process.env.CLAUDE_CODE_CLI_FLAVOR = 'claudex'
+process.env.CLAUDE_CONFIG_DIR =
+  process.env.CLAUDEX_CONFIG_DIR || join(homedir(), '.claudex')
+process.env.CUBENCE_MODEL_BACKEND = 'openaiResponses'
+process.env.CLAUDE_CODE_MODEL_BACKEND = 'openaiResponses'
+
+await import('./dist-ant/cli.js')
+`,
   { mode: 0o755 },
 )
 
@@ -76,6 +89,10 @@ ClaudeX is a local coding agent CLI built from the current ant variant in this r
 npm install -g ${publishPackageName}
 claudex
 \`\`\`
+
+ClaudeX registers only the \`claudex\` binary. It does not install or overwrite
+the official \`claude\` command. Runtime state is stored in \`~/.claudex\` by
+default, while Codex/OpenAI auth and model settings are read from \`~/.codex\`.
 
 ## Update
 

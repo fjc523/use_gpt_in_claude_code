@@ -60,7 +60,7 @@ export function isNonCustomOpusModel(model: ModelName): boolean {
  * Priority order within this function:
  * 1. Model override during session (from /model command) - highest priority
  * 2. Model override at startup (from --model flag)
- * 3. ANTHROPIC_MODEL environment variable
+ * 3. Provider-specific model environment variable
  * 4. Settings (from user's saved settings)
  */
 export function getUserSpecifiedModelSetting(): ModelSetting | undefined {
@@ -69,7 +69,6 @@ export function getUserSpecifiedModelSetting(): ModelSetting | undefined {
     const specifiedModel =
       getMainLoopModelOverride() ??
       process.env.OPENAI_MODEL ??
-      process.env.ANTHROPIC_MODEL ??
       settings.model ??
       undefined
     return specifiedModel ? resolveOpenAIModel(specifiedModel) : undefined
